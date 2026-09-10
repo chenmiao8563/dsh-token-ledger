@@ -220,6 +220,57 @@ sessions against the 72 logs carrying a `session/end-seed` marker and the 29
 declaring a parent. The 61 sessions outside both sets turned out to be
 four-record logs with no usage at all, which is why they correctly have no entry.
 
+## Live host mount, after the fixes (0.2.0)
+
+0.2.0 was published, installed into the same desktop profile and the host
+restarted. Three things that had only ever been argued were then observed:
+
+**The ledger rebuilds itself.** The version-2 bump did what it exists for — the
+0.1.0 file was discarded rather than trusted, and the fold started again:
+
+```
+20:25:00  backfilled 139 stored session(s), 0 unreadable; total  790455336 tokens over 4518 calls   (0.1.0)
+20:35:29  started a new ledger at <DSH_HOME>\token-ledger\ledger.json
+20:35:36  backfilled 139 stored session(s), 0 unreadable; total 1263174796 tokens over 7069 calls   (0.2.0)
+```
+
+**The command registers and answers.** `/tokens` was typed in a live
+conversation, and the session log recorded it:
+
+```
+command/run  {"name":"tokens","args":" ","source":{"kind":"user"}}
+command/done {"kind":"success","text":"Token ledger\n\n  calls  7,069\n  input (uncached)  244,727,714\n  cache read  1,012,…"}
+```
+
+**The settings route registers.** The log line added in 0.2.0 for exactly this
+purpose is present:
+
+```
+21:50:42 [I] [token-ledger] settings page route ready at /api/token-ledger/summary
+```
+
+### Independent cross-implementation audit
+
+The strongest check available in this project: the ledger the *running plugin*
+wrote — folded from the Cordis persistence service plus live session events — was
+audited by the *CLI*, which shares no code with that path and parses the raw
+zstd-framed logs itself.
+
+```
+$ dsh-token-ledger audit
+scanned 139 session log(s), 357988 events, 29 fork(s), 0 unreadable
+
+  stored      7328 calls  1417951113 tokens
+  recomputed  7328 calls  1417951113 tokens
+
+  audit: match — the stored ledger equals a fresh fold of the raw logs
+```
+
+Identical to the token, on 139 sessions, from two independent implementations.
+This closes the backfill-parity question the earlier drafts of this file listed
+as unverified, and it is also what makes the 0.1.1 boundary fix credible rather
+than merely plausible: the same comparison on 0.1.0 would have shown the gap.
+
 ## Browser half (0.2.0)
 
 What is checked here and what is not, because the difference is large.
@@ -265,13 +316,13 @@ which would have been a silent failure rather than an error:
 presentation component with React 18.3.1 — the same major version DSH bundles —
 through `react-dom/server`, and asserts the actual markup: the range tabs and
 their active state, the totals, hit rate and call count for each range, today's
-block surviving a year-range selection, the year heat grid (one cell per day plus
-five legend swatches), the month grid (every day of March), the week bars (seven,
-with inline heights), bounded heat levels drawn from a five-entry palette,
-proportional model bars, and the loading, error, stale and empty states. It also
-captures `console.error` and `console.warn` and **fails if React complained at
-all**, which is what catches an invalid DOM prop or a hook-order violation — the
-class of defect a hand-rolled `createElement` accepts silently.
+block surviving a year-range selection, the year heatmap with its weekday padding
+and month axis, the month and week bar charts with their fixed bar widths and
+thinned labels, bounded heat levels drawn from the seven-step ramp, the composed
+model bars and their colour key, and the loading, error, stale and empty states.
+It also captures `console.error` and `console.warn` and **fails if React
+complained at all**, which is what catches an invalid DOM prop or a hook-order
+violation — the class of defect a hand-rolled `createElement` accepts silently.
 
 React is a devDependency, so this runs in CI and under `prepublishOnly`. Without
 it installed the file skips with a stated reason rather than failing, which keeps
@@ -289,25 +340,27 @@ DSH ships, that a duplicate id is refused, that disposing retires the entry, and
 that registering into an undeclared slot is refused, which is why the plugin uses
 `slots.inject` rather than registering blind.
 
-**Not checked.** Whether the client module loader accepts the file, whether the
-shell renders the section, and how any of it looks. Nothing here executes
-`window.__ModuleLoader__` or mounts the component into a DOM: the module's shape
-is asserted to match every bundle DSH ships, and the registration is validated by
-the real registry, but no single process loads the plugin the way the browser
-does. The remaining risk is integration and visual — a first-run surprise, not a
-contractual one.
+**Checked in a real browser, by a person.** The browser half is the one part this
+environment cannot drive, and it was the last thing left. It is now observed:
+the settings section renders in the sidebar, the range tabs and the calendar
+switch, and the layout feedback that produced 0.3.0 — month labels wanted on the
+year heatmap, a deeper ramp, thinner bars, and a composed model bar — could only
+come from looking at the page. What no check here covers is the *appearance* of
+the render: spacing, alignment and colour against the rest of the settings UI are
+verified by eye, not by assertion.
+
+**Not checked by machine.** The client module loader accepting the file, and the
+component mounting into a DOM. Nothing here executes `window.__ModuleLoader__` or
+runs a real reconciler into a document: the module's shape is asserted to match
+every bundle DSH ships, the registration is validated by the real registry, and
+the markup is asserted under the real React — but the loader and the mount are
+covered by observation rather than by a test that can run unattended.
 
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not
 useful:
 
-- **`/tokens` end to end through the GUI.** The command now satisfies the
-  registry contract and is covered by a regression test, but the corrected build
-  has not yet been observed answering `/tokens` in a live conversation.
-- **Backfill parity with the CLI on a real host.** Both paths now share one
-  boundary function, and each is tested, but the backfill's numbers have not
-  been compared against a CLI rebuild on the same host after the 0.1.1 fix.
 - **Any DSH release other than `0.1.2-rc.1`.** The API surface used is stable
   across the `0.1.2` line by inspection, not by test.
 - **Non-Windows platforms.** The logic is platform-independent and CI runs
@@ -316,3 +369,9 @@ useful:
 - **Provider billing agreement.** The ledger counts what the session log
   records. It makes no claim about what a provider invoices, which can differ
   for failed, retried or partially delivered requests.
+
+Two items that earlier drafts of this file listed here have since been closed
+with evidence rather than removed quietly: `/tokens` answering in a live
+conversation, and backfill parity with the CLI on a real host. Both are recorded
+under [Live host mount, after the fixes](#live-host-mount-after-the-fixes-020)
+above.
