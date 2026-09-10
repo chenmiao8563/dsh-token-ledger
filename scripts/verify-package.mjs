@@ -187,20 +187,53 @@ try {
 
 // The manifest must declare the browser half and the packages it needs, or the
 // client loader never loads it.
-check(manifest.dsh?.client?.platform === 'web', 'declares a web client half', String(manifest.dsh?.client?.platform))
-const clientInject = manifest.dsh?.client?.inject
+//
+// These checks mirror `parseDshClient` in @deepseek-ai/dsh-client-modules, which
+// THROWS on a malformed declaration while scanning at activation. A malformed
+// `dsh.client` is therefore not a cosmetic problem: it can stop the profile from
+// booting at all, so every rule that function enforces is repeated here where a
+// `prepublishOnly` run will catch it.
+const clientDecl = manifest.dsh?.client
 check(
-  Array.isArray(clientInject) && clientInject.length > 0,
-  'declares the client packages it injects',
-  JSON.stringify(clientInject),
+  typeof clientDecl === 'object' && clientDecl !== null,
+  'dsh.client is an object',
+  JSON.stringify(clientDecl),
 )
-// Every name here must be a package that ships a client bundle. A core library
-// such as @deepseek-ai/dsh-client-ui-slots exports no "./client" and is never a
-// client module row, so listing one is a silent no-op at best. The loader only
-// exposes client halves under the @deepseek-ai/dsh-client- prefix, and each of
-// those declares `dsh.client`; this check cannot resolve them offline, so it
-// pins the namespace and the reviewer checks the rest.
-for (const name of clientInject ?? []) {
+check(typeof clientDecl?.platform === 'string', 'dsh.client.platform is a string', String(clientDecl?.platform))
+check(clientDecl?.platform === 'web', 'declares a web client half', String(clientDecl?.platform))
+
+/**
+ * Assert a `dsh.client` field is an optional array of non-empty strings.
+ *
+ * @param {string} field - the field name, for the message.
+ * @returns {string[]} the names, when present.
+ */
+function optionalStringArray(field) {
+  const value = clientDecl?.[field]
+  if (value === undefined) {
+    check(true, `dsh.client.${field} is absent or a string array`)
+    return []
+  }
+  const ok = Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim() !== '')
+  check(ok, `dsh.client.${field} is an array of non-empty strings`, JSON.stringify(value))
+  return ok ? value : []
+}
+
+if (clientDecl?.immediately !== undefined) {
+  check(typeof clientDecl.immediately === 'boolean', 'dsh.client.immediately is a boolean', String(clientDecl.immediately))
+}
+
+const clientInject = optionalStringArray('inject')
+check(clientInject.length > 0, 'declares the client packages it injects', JSON.stringify(clientInject))
+optionalStringArray('external')
+
+// Every name here must be a package that ships a client bundle, because the boot
+// wire is keyed by package id and only rows exist there. A core library such as
+// @deepseek-ai/dsh-client-ui-slots exports no "./client" and declares no
+// `dsh.client`, so it is never a row — listing one is a silent no-op at best.
+// This script cannot resolve those packages offline, so it pins the namespace
+// and the reviewer checks the rest.
+for (const name of clientInject) {
   check(
     name.startsWith('@deepseek-ai/dsh-client-'),
     `client inject "${name}" is in the client-half namespace`,
