@@ -10,9 +10,12 @@ on:
         type: boolean
         default: true
 
+# id-token is what lets npm verify this run came from this repository, so no
+# long-lived publish token has to exist anywhere. See
+# https://docs.npmjs.com/trusted-publishers/ for the matching npm-side setup.
 permissions:
   contents: write # create the GitHub release
-  id-token: write # npm provenance
+  id-token: write # OIDC for trusted publishing
 
 jobs:
   publish:
@@ -20,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No dependency cache on purpose: a release build should not be able to
+      # resolve anything stale, and this package has no dependencies anyway.
       - uses: actions/setup-node@v4
         with:
           node-version: '22.x'
@@ -31,22 +36,39 @@ jobs:
       - name: Verify packaging invariants
         run: npm run verify
 
+      - name: Read the version
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Check the tag matches package.json
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           set -eu
           tag="${GITHUB_REF_NAME#v}"
-          pkg=$(node -p "require('./package.json').version")
+          pkg="${{ steps.version.outputs.value }}"
           if [ "$tag" != "$pkg" ]; then
             echo "tag $GITHUB_REF_NAME does not match package.json version $pkg"
             exit 1
           fi
 
+      # A version that is already on the registry cannot be published again.
+      # Detecting that keeps a tag re-push from failing the whole run, which
+      # matters when a release was first published by hand with an OTP.
+      - name: Is this version already published?
+        id: published
+        run: |
+          set -eu
+          if npm view "dsh-token-ledger@${{ steps.version.outputs.value }}" version >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+            echo "dsh-token-ledger@${{ steps.version.outputs.value }} is already on the registry"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "dsh-token-ledger@${{ steps.version.outputs.value }} is not on the registry yet"
+          fi
+
       - name: Publish
-        if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true && steps.published.outputs.value == 'false'
+        run: npm publish --access public
 
       - name: Pack only
         if: ${{ !startsWith(github.ref, 'refs/tags/v') || inputs.dry-run == true }}

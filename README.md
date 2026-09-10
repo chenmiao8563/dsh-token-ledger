@@ -193,6 +193,29 @@ spawning a child process per test file is blocked, use
 See [docs/VERIFICATION.md](docs/VERIFICATION.md) for what was actually verified
 and how, including the evidence behind the fork rule.
 
+## Releasing
+
+npm requires two-factor authentication for every publish, so a version's first
+release is interactive:
+
+```bash
+npm login
+npm publish --access public --otp=<six digits from your authenticator>
+```
+
+After that first publish, configure a **Trusted Publisher** for the package on
+npmjs.com (package → Settings → Trusted Publisher → GitHub Actions, repository
+`chenmiao8563/dsh-token-ledger`, workflow `release.yml`). OIDC cannot be set up
+before the package exists, which is why the first release is manual. From then
+on, a tag push publishes with no stored token at all:
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+`release.yml` skips the publish step when the version is already on the
+registry and creates the GitHub release regardless, so re-running it is safe.
+
 ## License
 
 MIT

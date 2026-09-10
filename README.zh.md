@@ -178,6 +178,27 @@ npm run verify      # 打包不变式（零依赖、无安装脚本、无裸模�
 实际验证了什么、怎么验证的（包括 fork 规则背后的证据）见
 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
+## 发布
+
+npm 现在强制每次发布都要 2FA，所以一个版本的首发必须交互式完成：
+
+```bash
+npm login
+npm publish --access public --otp=<认证器里的 6 位数字>
+```
+
+首发之后，在 npmjs.com 上给这个包配 **Trusted Publisher**（包 → Settings →
+Trusted Publisher → GitHub Actions，仓库填 `chenmiao8563/dsh-token-ledger`，
+workflow 填 `release.yml`）。OIDC 没法在包存在之前配置，这就是首发必须手动的
+原因。配好之后，打 tag 即可发布，**不需要存放任何 token**：
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+`release.yml` 会在版本已存在于 registry 时跳过发布步骤、但仍创建 GitHub
+Release，所以重复运行是安全的。
+
 ## 许可证
 
 MIT
