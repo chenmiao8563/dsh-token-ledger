@@ -1,6 +1,6 @@
 {
   "name": "@chenmiao8563/dsh-token-ledger",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Transparent, auditable token accounting for DeepSeek Harness: a restart-safe ledger over the durable session log, plus a CLI that recomputes it from raw logs and diffs the result.",
   "keywords": [
     "dsh",
@@ -26,6 +26,9 @@
     "./ledger": "./lib/ledger.js",
     "./session-log": "./lib/session-log.js",
     "./store": "./lib/store.js",
+    "./overview": "./lib/overview.js",
+    "./route": "./lib/route.js",
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -56,6 +59,14 @@
     "pluginType": "feature",
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     },
     "compatibility": {
       "dsh": ">=0.1.2-alpha.1"

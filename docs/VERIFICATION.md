@@ -220,6 +220,29 @@ sessions against the 72 logs carrying a `session/end-seed` marker and the 29
 declaring a parent. The 61 sessions outside both sets turned out to be
 four-record logs with no usage at all, which is why they correctly have no entry.
 
+## Browser half (0.2.0)
+
+What is checked here and what is not, because the difference is large.
+
+**Checked.** `lib/overview.js` and `lib/route.js` are pure or near-pure and are
+tested directly: range boundaries, cache-hit-rate arithmetic, gap-filled series,
+the loopback and origin guard, method handling, and the 500-on-fault path. The
+browser half is loaded through a stand-in module loader with a stand-in React,
+which exercises the module wrapper, the registration contract, and the whole
+render tree — formatting, heat levels, week-bar slicing, view switching, and the
+empty, malformed and stale-data paths. `scripts/verify-package.mjs` additionally
+fails the build if the browser half requires anything the loader does not provide,
+if its module id stops matching the package name, or if it stops compiling as a
+classic script.
+
+**Not checked.** Whether the settings shell accepts the registration, whether the
+section appears in the sidebar, and how any of it looks. There is no browser in
+this environment, React is supplied by the client loader rather than installed,
+and the slot contract was reconstructed by reading the shipped client bundles and
+a working reference plugin rather than queried live. Both of those are real risks
+of a first-run surprise, which is why the registration mirrors, field for field, a
+plugin already known to work on this DSH line.
+
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not

@@ -8,6 +8,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.2.0] - 2026-09-10
+
+### Added
+
+- **A settings page.** The browser half registers a `settings.section`, so the
+  ledger appears in the settings sidebar beside every other section. It shows:
+  - range totals for **this month**, **this year** and the **last 7 days**, each
+    with total tokens, cache hit rate and call count, plus the bucket breakdown;
+  - **today**, live, which moves as steps complete;
+  - a **usage calendar** switchable between year, month and week, where the week
+    view is a bar chart rather than a heatmap;
+  - the per-model breakdown with its own cache hit rates.
+- `lib/overview.js`, a pure function from a ledger snapshot to the payload the
+  page renders, and `lib/route.js`, the read-only
+  `GET /api/token-ledger/summary` route that serves it.
+- The browser half is hand-written against the client's module loader and
+  requires nothing but `react`, so the package still installs with no build step.
+
+### Changed
+
+- The overview is served over an HTTP route rather than a settings namespace.
+  A namespace would need a schema — a real dependency — and would rewrite
+  `settings.yaml` on every debounce with data that is derived and reproducible.
+  The ledger file remains the only store of record.
+
 ## [0.1.1] - 2026-09-10
 
 Both fixes come from mounting the plugin in a real DSH host, which is the only
@@ -63,6 +88,7 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/chenmiao8563/dsh-token-ledger/releases/tag/v0.1.0

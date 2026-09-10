@@ -22,6 +22,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import vm from 'node:vm'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const failures = []
@@ -149,6 +150,54 @@ run(['--help'], { stdout: (text) => (helped += text), stderr: () => {}, env: {} 
 for (const command of ['summary', 'audit', 'rebuild', 'export']) {
   check(helped.includes(command), `cli help documents "${command}"`)
 }
+
+// The browser half has its own contract, and none of it is enforced by npm.
+const browserHalf = readFileSync(join(root, 'lib/client.js'), 'utf8')
+
+// It is a module for the client's global loader, not an ES module. Leading
+// comments are stripped first, because the file documents itself before it runs.
+const browserCode = browserHalf.replace(/^(?:\s*\/\*[\s\S]*?\*\/|\s*\/\/[^\n]*|\s)+/, '')
+check(
+  browserCode.startsWith('window.__ModuleLoader__.load('),
+  'the browser half registers itself with the client module loader',
+  browserCode.slice(0, 40),
+)
+const moduleId = /__ModuleLoader__\.load\(\s*\{\s*id:\s*['"`]([^'"`]+)['"`]/.exec(browserHalf)?.[1]
+check(moduleId === manifest.name, 'the client module id is the package name', String(moduleId))
+
+// Everything it requires must be provided by the loader; anything else would be
+// unresolvable at runtime, because there is no bundler and no node_modules.
+const LOADER_PROVIDED = new Set(['react', 'react-dom', 'react/jsx-runtime'])
+for (const match of browserHalf.matchAll(/require\(\s*['"`]([^'"`]+)['"`]\s*\)/g)) {
+  check(
+    LOADER_PROVIDED.has(match[1]),
+    `client require("${match[1]}") is loader-provided`,
+    'only react, react-dom and react/jsx-runtime are supplied by the loader',
+  )
+}
+// A file the browser loads verbatim has to be valid JavaScript on its own: no
+// ESM syntax, and nothing that only a bundler would resolve.
+check(!/^\s*(import|export)\s/m.test(browserHalf), 'the browser half has no import/export statements')
+try {
+  new vm.Script(browserHalf, { filename: 'lib/client.js' })
+  check(true, 'the browser half compiles as a classic script')
+} catch (error) {
+  check(false, 'the browser half compiles as a classic script', error.message)
+}
+
+// The manifest must declare the browser half and the packages it needs, or the
+// client loader never loads it.
+check(manifest.dsh?.client?.platform === 'web', 'declares a web client half', String(manifest.dsh?.client?.platform))
+check(
+  Array.isArray(manifest.dsh?.client?.inject) && manifest.dsh.client.inject.length > 0,
+  'declares the client packages it injects',
+  JSON.stringify(manifest.dsh?.client?.inject),
+)
+check(
+  manifest.exports?.['./client'] === './lib/client.js',
+  'exports the browser half as ./client',
+  String(manifest.exports?.['./client']),
+)
 
 console.log(notes.join('\n'))
 if (failures.length > 0) {

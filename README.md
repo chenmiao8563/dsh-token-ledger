@@ -144,6 +144,33 @@ audit useless. The ledger's own `updatedAt` settles it:
          (1 calls, 5100 tokens not yet flushed)
 ```
 
+## Settings page
+
+The browser half adds a **Token ledger** section to the settings sidebar:
+
+- **Range totals** for this month, this year and the last 7 days — total tokens,
+  cache hit rate, call count, and the bucket breakdown behind them. The cache hit
+  rate is `cacheRead / (cacheRead + uncachedInput)`: the share of input the prompt
+  cache absorbed, so a route with no caching reads 0% rather than undefined.
+- **Today, live** — today's tokens, hit rate and calls, which move as steps
+  complete.
+- **A usage calendar** switchable between year, month and week. Year and month are
+  heatmaps; the week view is a bar chart. Heat levels are relative to the busiest
+  day in the window and square-rooted, so one huge day cannot flatten the rest.
+- **Per model** totals, each with its own hit rate.
+
+The page reads one read-only route, `GET /api/token-ledger/summary`, and polls it
+every 15 seconds. The route refuses a non-loopback peer, so it stays private even
+if the web server is bound to `0.0.0.0`.
+
+It needs a profile with a web server (the `web` or `desktop` profile). Without one,
+`/tokens` and the CLI still work, and the section says so instead of failing.
+
+The overview is deliberately **not** published through a settings namespace. That
+would need a schema — a real dependency, and this package has none — and would
+rewrite `settings.yaml` on every debounce with data that is derived and
+reproducible. The ledger file stays the only store of record.
+
 ## Configuration
 
 Override the composition entry by its `id`:
