@@ -213,8 +213,8 @@ The ledger file is left alone on purpose — delete
 ## Development
 
 ```bash
-npm install         # two devDependencies: react and react-dom, for the render tests
-npm test            # 96 tests
+npm install         # devDependencies only: react, react-dom, and the slot registry DSH runs
+npm test            # 106 tests
 npm run verify      # packaging invariants (dependency-free, no install scripts, no bare imports)
 ```
 
@@ -222,14 +222,14 @@ npm run verify      # packaging invariants (dependency-free, no install scripts,
 spawning a child process per test file is blocked, use
 `npm run test:single-process`.
 
-React is a **devDependency only**. It is never installed for a consumer: the
-package ships with no dependencies, no peer dependencies and no install scripts,
-and `pnpm` does not install a dependency's devDependencies. It is here so the
-browser half can be rendered and asserted under the real library, which catches
-things a stand-in cannot — hook-order violations and invalid DOM props, which
-React reports and a hand-rolled `createElement` silently accepts. Without it
-installed, those render tests skip with a stated reason instead of failing, so
-`npm test` still works from a fresh clone with no network.
+The devDependencies are **test-only**. They are never installed for a consumer:
+the package ships with no dependencies, no peer dependencies and no install
+scripts, and `pnpm` does not install a dependency's devDependencies. They exist
+so the browser half can be checked against the real thing — React renders it, so
+a hook-order or DOM-prop mistake fails instead of passing silently, and
+`@deepseek-ai/dsh-client-ui-slots` validates the registration against the very
+registry that DSH runs. Without them installed the affected tests skip with a
+stated reason, so `npm test` still works from a fresh clone with no network.
 
 See [docs/VERIFICATION.md](docs/VERIFICATION.md) for what was actually verified
 and how, including the evidence behind the fork rule.

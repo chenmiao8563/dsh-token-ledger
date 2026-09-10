@@ -273,13 +273,25 @@ React is a devDependency, so this runs in CI and under `prepublishOnly`. Without
 it installed the file skips with a stated reason rather than failing, which keeps
 `npm test` working from a fresh clone with no network.
 
-**Not checked.** Whether the shell accepts the registration at runtime, whether
-the section appears in the sidebar, and how any of it looks. There is no browser
-in this environment, so nothing here exercises the client module loader itself,
-the slot registry, or the settings shell — the registration is asserted against
-the shapes those read out of DSH's source, and the component is asserted against
-real React, but the two are never joined by anything that runs. The remaining
-risk is integration and visual: a first-run surprise, not a contractual one.
+**Checked against the real slot registry.** `test/slot-registration.test.mjs`
+feeds the registration `apply` actually builds into
+`@deepseek-ai/dsh-client-ui-slots` — the registry DSH itself runs, pinned as a
+devDependency to `0.1.2-rc.1`, the exact version this DSH bundles (`latest` on
+npm is an older `0.0.1-rc.1`, so the version is pinned rather than ranged). It
+asserts that the registry accepts the entry, that `resolveSlotLabel` resolves the
+label thunk to a non-empty string — a label it could not resolve would render as
+a blank sidebar row — that the entry id does not collide with the three sections
+DSH ships, that a duplicate id is refused, that disposing retires the entry, and
+that registering into an undeclared slot is refused, which is why the plugin uses
+`slots.inject` rather than registering blind.
+
+**Not checked.** Whether the client module loader accepts the file, whether the
+shell renders the section, and how any of it looks. Nothing here executes
+`window.__ModuleLoader__` or mounts the component into a DOM: the module's shape
+is asserted to match every bundle DSH ships, and the registration is validated by
+the real registry, but no single process loads the plugin the way the browser
+does. The remaining risk is integration and visual — a first-run surprise, not a
+contractual one.
 
 ## Not verified
 
