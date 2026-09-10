@@ -95,8 +95,8 @@ Verified with a disposable `DSH_HOME` so no real profile was touched:
 ```
 $ DSH_HOME=<tmp>/home <dsh-desktop-cli> plugin --profile web add <repo path>
 dsh: initialized profile web at <tmp>/home/profiles/web
-+ dsh-token-ledger link:C:/.../plugins/dsh-token-ledger
-Done in 517ms using pnpm v11.8.0
++ @chenmiao8563/dsh-token-ledger link:C:/.../plugins/dsh-token-ledger
+Done in 317ms using pnpm v11.8.0
 ```
 
 The profile manifest was updated by the CLI's own reconciler, which only adds a
@@ -106,21 +106,38 @@ dependency whose package declares `dsh.bundle.patch`:
 "dsh": { "profile": { "bundles": [
   "@deepseek-ai/dsh-base",
   "@deepseek-ai/dsh-web-app",
-  "dsh-token-ledger"
+  "@chenmiao8563/dsh-token-ledger"
 ] } }
 ```
 
-And the composition really contains the row:
+And the composition really contains the row, with the scoped specifier resolving
+as a Cordis entry name:
 
 ```
 $ DSH_HOME=<tmp>/home <dsh-desktop-cli> --profile web --dump-config
-# == dsh-token-ledger
+# == @chenmiao8563/dsh-token-ledger
 - id: token-ledger
-  name: dsh-token-ledger
+  name: '@chenmiao8563/dsh-token-ledger'
 ```
 
 Installing involved no build step and no `allowBuilds` entry, which is the
 package's central installability claim.
+
+### Why the package is scoped
+
+The unscoped name `dsh-token-ledger` was rejected at publish time:
+
+```
+403 Forbidden - PUT https://registry.npmjs.org/dsh-token-ledger - Package name
+too similar to existing package dsh-tokenledger
+```
+
+npm normalizes separators away before comparing, so `dsh-token-ledger` and the
+existing `dsh-tokenledger` collide. Note that a registry lookup for the name
+returned `E404`, which only proves the name is unclaimed — it does not predict
+this similarity gate, which runs at publish time. The scoped name was
+re-verified end to end as shown above; the CLI command and Cordis entry id are
+unchanged.
 
 ### Note for whoever verifies this next
 

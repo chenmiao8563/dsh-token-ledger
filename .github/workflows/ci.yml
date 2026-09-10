@@ -56,7 +56,7 @@ jobs:
       - name: Assert the tarball carries everything an installer needs
         run: |
           set -eu
-          tarball=$(ls dsh-token-ledger-*.tgz)
+          tarball=$(ls *dsh-token-ledger-*.tgz)
           echo "packed $tarball"
           listing=$(tar -tzf "$tarball")
           for required in \
@@ -83,7 +83,7 @@ jobs:
           set -eu
           mkdir -p /tmp/consumer && cd /tmp/consumer
           npm init -y >/dev/null
-          npm install --no-audit --no-fund "$GITHUB_WORKSPACE"/dsh-token-ledger-*.tgz
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE"/*dsh-token-ledger-*.tgz
           ./node_modules/.bin/dsh-token-ledger --version
           ./node_modules/.bin/dsh-token-ledger --help | grep -q audit
 

@@ -3,7 +3,7 @@
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供透明、可审计的 token 记账。
 
 [![CI](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/dsh-token-ledger.svg)](https://www.npmjs.com/package/dsh-token-ledger)
+[![npm](https://img.shields.io/npm/v/@chenmiao8563/dsh-token-ledger.svg)](https://www.npmjs.com/package/@chenmiao8563/dsh-token-ledger)
 [![license](https://img.shields.io/npm/l/dsh-token-ledger.svg)](./LICENSE)
 
 [English](README.md) | 中文
@@ -41,7 +41,7 @@ scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
 
 ```bash
 # 从 npm
-dsh plugin --profile web add dsh-token-ledger
+dsh plugin --profile web add @chenmiao8563/dsh-token-ledger
 
 # 从 git URL（不涉及任何构建步骤）
 dsh plugin --profile web add github:chenmiao8563/dsh-token-ledger
@@ -49,6 +49,10 @@ dsh plugin --profile web add github:chenmiao8563/dsh-token-ledger
 # 从本地仓库
 dsh plugin --profile web add /absolute/path/to/dsh-token-ledger
 ```
+
+npm 包名带 scope，是因为 npm 会把分隔符归一化后比较，无 scope 的
+`dsh-token-ledger` 被判为与已有包过于相似而拒绝发布。CLI 命令名仍然是
+`dsh-token-ledger`。
 
 重启 DSH，然后确认那一行进去了：
 
@@ -160,7 +164,7 @@ dsh-token-ledger export  [选项]       导出 CSV 与 JSON
 ## 卸载
 
 ```bash
-dsh plugin --profile web remove dsh-token-ledger
+dsh plugin --profile web remove @chenmiao8563/dsh-token-ledger
 ```
 
 账本文件是**故意**不删的——要清空历史请自行删除 `<DSH_HOME>/token-ledger/`。

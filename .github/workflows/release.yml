@@ -58,12 +58,12 @@ jobs:
         id: published
         run: |
           set -eu
-          if npm view "dsh-token-ledger@${{ steps.version.outputs.value }}" version >/dev/null 2>&1; then
+          if npm view "@chenmiao8563/dsh-token-ledger@${{ steps.version.outputs.value }}" version >/dev/null 2>&1; then
             echo "value=true" >> "$GITHUB_OUTPUT"
-            echo "dsh-token-ledger@${{ steps.version.outputs.value }} is already on the registry"
+            echo "@chenmiao8563/dsh-token-ledger@${{ steps.version.outputs.value }} is already on the registry"
           else
             echo "value=false" >> "$GITHUB_OUTPUT"
-            echo "dsh-token-ledger@${{ steps.version.outputs.value }} is not on the registry yet"
+            echo "@chenmiao8563/dsh-token-ledger@${{ steps.version.outputs.value }} is not on the registry yet"
           fi
 
       - name: Publish
@@ -74,7 +74,7 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/v') || inputs.dry-run == true }}
         run: |
           npm pack
-          ls -l dsh-token-ledger-*.tgz
+          ls -l *dsh-token-ledger-*.tgz
 
       - name: Create the GitHub release
         if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true
@@ -84,4 +84,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes "See [CHANGELOG.md](CHANGELOG.md) for what changed." \
-            dsh-token-ledger-*.tgz
+            *dsh-token-ledger-*.tgz

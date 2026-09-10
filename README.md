@@ -3,7 +3,7 @@
 Transparent, auditable token accounting for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 [![CI](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/dsh-token-ledger.svg)](https://www.npmjs.com/package/dsh-token-ledger)
+[![npm](https://img.shields.io/npm/v/@chenmiao8563/dsh-token-ledger.svg)](https://www.npmjs.com/package/@chenmiao8563/dsh-token-ledger)
 [![license](https://img.shields.io/npm/l/dsh-token-ledger.svg)](./LICENSE)
 
 [English](README.md) | [中文](README.zh.md)
@@ -44,7 +44,7 @@ for when you need to *defend* the number.
 
 ```bash
 # from npm
-dsh plugin --profile web add dsh-token-ledger
+dsh plugin --profile web add @chenmiao8563/dsh-token-ledger
 
 # from a git URL (no build step is involved)
 dsh plugin --profile web add github:chenmiao8563/dsh-token-ledger
@@ -52,6 +52,10 @@ dsh plugin --profile web add github:chenmiao8563/dsh-token-ledger
 # from a local checkout
 dsh plugin --profile web add /absolute/path/to/dsh-token-ledger
 ```
+
+The npm package is scoped because npm rejects the unscoped name
+`dsh-token-ledger` as too similar to an existing package once separators are
+normalized away. The CLI command is still `dsh-token-ledger`.
 
 Restart DSH, then check the row landed:
 
@@ -173,7 +177,7 @@ Override the composition entry by its `id`:
 ## Uninstall
 
 ```bash
-dsh plugin --profile web remove dsh-token-ledger
+dsh plugin --profile web remove @chenmiao8563/dsh-token-ledger
 ```
 
 The ledger file is left alone on purpose — delete

@@ -1,4 +1,8 @@
-# Bundle patch for `dsh plugin add dsh-token-ledger`.
+# Bundle patch for `dsh plugin add @chenmiao8563/dsh-token-ledger`.
+#
+# The package is scoped because npm rejects the unscoped name as too similar to
+# an existing package once separators are normalized away. The plugin's Cordis
+# entry id stays `token-ledger`, and the CLI command stays `dsh-token-ledger`.
 #
 # This adds exactly one entry and touches nothing else: no stock component is
 # disabled or replaced, so the ledger can coexist with any other usage,
@@ -13,4 +17,4 @@
 #
 - insert:
     - id: token-ledger
-      name: 'dsh-token-ledger'
+      name: '@chenmiao8563/dsh-token-ledger'
