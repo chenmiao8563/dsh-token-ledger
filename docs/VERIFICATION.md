@@ -242,10 +242,14 @@ from a third-party plugin:
 
 | Contract | Where it was read | Result |
 | --- | --- | --- |
-| The `settings.section` registration shape | the four sections DSH ships: `dsh-client-ui-settings-models` (order 10), `-settings-plugins` (15), `-ui-agent-preset` (20), and the shell in `-settings-general` that renders them via `renderSlot("settings.section", …, { only: active })` | identical field set; `locale` is optional, proven by `-settings-models` omitting it; the sidebar rows come from `id`, `order` and `label`, all of which this plugin supplies |
+| The `settings.section` registration shape | the sections DSH ships — `dsh-client-ui-settings-models` (order 10), `-settings-plugins` (15) and `-ui-agent-preset` (20) — plus the shell in `-settings-general` that renders them via `renderSlot("settings.section", …, { only: active })` | identical field set; `locale` is optional, proven by `-settings-models` omitting it; the sidebar rows come from `id`, `order` and `label`, all of which this plugin supplies |
 | The client module format | every `@deepseek-ai/dsh-client-*/lib/client.js` | byte-identical wrapper: `window.__ModuleLoader__.load({ id, factory })` with `var module = { exports: {} }` and `exports.apply`/`exports.inject` |
 | When the factory runs | `dsh-client-modules` module docs | only registration happens at script execution; body side effects, styles included, run at materialization — which is why the stylesheet is installed inside `apply()` |
 | The `dsh.client` declaration | `parseDshClient` in `dsh-client-modules/lib/index.js` | `platform` must be a string and only `web` is loaded; `inject` and `external` are optional string arrays; `external` — not `inject` — is what orders the module graph |
+| What `dsh.client.inject` **contains** | the five `dsh.client` declarations DSH ships, two of them non-empty: `dsh-client-locale` and `dsh-client-ui-settings-general` | **package/entry ids, not service names.** A module's own exported `inject` is the separate service list. This plugin lists the two packages whose services it uses, which is the same convention, and an empty list is also legal (`dsh-client-connection` uses one) |
+| What `external` contains | the module-graph walk in `dsh-client-modules/lib/client.js`, which runs every entry through `stripClientSuffix` before resolving it | module specifiers for *other rows*. This plugin requires only `react`, which the loader provides and no row owns, so it declares none |
+| How `exports["./client"]` is located | `clientExportOf` in `dsh-client-modules/lib/index.js` | a plain string or an object with a string `default`; anything else throws. A plain string is used here, and `verify-package.mjs` pins it |
+| Whether a **scoped** package id survives | `stripClientSuffix` in `dsh-client-modules/lib/client.js` | it removes only a trailing `/client`, so `@chenmiao8563/dsh-token-ledger` passes through intact. DSH's own client packages are scoped too, so the transport already carries ids containing `/` |
 
 That reading corrected two real mistakes in the first draft of this half, both of
 which would have been a silent failure rather than an error:
