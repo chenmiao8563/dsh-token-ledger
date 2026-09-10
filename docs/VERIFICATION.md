@@ -224,24 +224,44 @@ four-record logs with no usage at all, which is why they correctly have no entry
 
 What is checked here and what is not, because the difference is large.
 
-**Checked.** `lib/overview.js` and `lib/route.js` are pure or near-pure and are
-tested directly: range boundaries, cache-hit-rate arithmetic, gap-filled series,
-the loopback and origin guard, method handling, and the 500-on-fault path. The
-browser half is loaded through a stand-in module loader with a stand-in React,
-which exercises the module wrapper, the registration contract, and the whole
-render tree — formatting, heat levels, week-bar slicing, view switching, and the
-empty, malformed and stale-data paths. `scripts/verify-package.mjs` additionally
-fails the build if the browser half requires anything the loader does not provide,
-if its module id stops matching the package name, or if it stops compiling as a
-classic script.
+**Checked by test.** `lib/overview.js` and `lib/route.js` are pure or near-pure
+and are tested directly: range boundaries, cache-hit-rate arithmetic, gap-filled
+series, the loopback and origin guard, method handling, and the 500-on-fault
+path. The browser half is loaded through a stand-in module loader with a
+stand-in React, which exercises the module wrapper, the registration contract,
+and the whole render tree — formatting, heat levels, week-bar slicing, view
+switching, and the empty, malformed and stale-data paths.
+`scripts/verify-package.mjs` additionally fails the build if the browser half
+requires anything the loader does not provide, if its module id stops matching
+the package name, if it stops compiling as a classic script, or if a declared
+client dependency is outside the client-half namespace.
 
-**Not checked.** Whether the settings shell accepts the registration, whether the
-section appears in the sidebar, and how any of it looks. There is no browser in
-this environment, React is supplied by the client loader rather than installed,
-and the slot contract was reconstructed by reading the shipped client bundles and
-a working reference plugin rather than queried live. Both of those are real risks
-of a first-run surprise, which is why the registration mirrors, field for field, a
-plugin already known to work on this DSH line.
+**Checked by reading DSH's own source, not by inference.** The contracts the
+browser half depends on were read out of the shipped bundles rather than copied
+from a third-party plugin:
+
+| Contract | Where it was read | Result |
+| --- | --- | --- |
+| The `settings.section` registration shape | the four sections DSH ships: `dsh-client-ui-settings-models` (order 10), `-settings-plugins` (15), `-ui-agent-preset` (20), and the shell in `-settings-general` that renders them via `renderSlot("settings.section", …, { only: active })` | identical field set; `locale` is optional, proven by `-settings-models` omitting it; the sidebar rows come from `id`, `order` and `label`, all of which this plugin supplies |
+| The client module format | every `@deepseek-ai/dsh-client-*/lib/client.js` | byte-identical wrapper: `window.__ModuleLoader__.load({ id, factory })` with `var module = { exports: {} }` and `exports.apply`/`exports.inject` |
+| When the factory runs | `dsh-client-modules` module docs | only registration happens at script execution; body side effects, styles included, run at materialization — which is why the stylesheet is installed inside `apply()` |
+| The `dsh.client` declaration | `parseDshClient` in `dsh-client-modules/lib/index.js` | `platform` must be a string and only `web` is loaded; `inject` and `external` are optional string arrays; `external` — not `inject` — is what orders the module graph |
+
+That reading corrected two real mistakes in the first draft of this half, both of
+which would have been a silent failure rather than an error:
+
+- `@deepseek-ai/dsh-client-ui-slots` was listed as a client dependency. It is a
+  pure core library (its manifest exports only `.`, and it declares no
+  `dsh.client`), so it is never a client module row.
+- The settings shell package was listed as `-ui-settings`, which holds the
+  namespace-scope service; the section slot is declared and rendered by
+  `-ui-settings-general`.
+
+**Not checked.** Whether the shell accepts the registration at runtime, whether
+the section appears in the sidebar, and how any of it looks. There is no browser
+in this environment and React is supplied by the client loader rather than
+installed, so the render tree is exercised through a stand-in rather than a real
+reconciler. The remaining risk is visual and first-run, not contractual.
 
 ## Not verified
 

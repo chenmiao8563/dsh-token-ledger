@@ -188,11 +188,25 @@ try {
 // The manifest must declare the browser half and the packages it needs, or the
 // client loader never loads it.
 check(manifest.dsh?.client?.platform === 'web', 'declares a web client half', String(manifest.dsh?.client?.platform))
+const clientInject = manifest.dsh?.client?.inject
 check(
-  Array.isArray(manifest.dsh?.client?.inject) && manifest.dsh.client.inject.length > 0,
+  Array.isArray(clientInject) && clientInject.length > 0,
   'declares the client packages it injects',
-  JSON.stringify(manifest.dsh?.client?.inject),
+  JSON.stringify(clientInject),
 )
+// Every name here must be a package that ships a client bundle. A core library
+// such as @deepseek-ai/dsh-client-ui-slots exports no "./client" and is never a
+// client module row, so listing one is a silent no-op at best. The loader only
+// exposes client halves under the @deepseek-ai/dsh-client- prefix, and each of
+// those declares `dsh.client`; this check cannot resolve them offline, so it
+// pins the namespace and the reviewer checks the rest.
+for (const name of clientInject ?? []) {
+  check(
+    name.startsWith('@deepseek-ai/dsh-client-'),
+    `client inject "${name}" is in the client-half namespace`,
+    'only packages that ship a "./client" bundle may be listed',
+  )
+}
 check(
   manifest.exports?.['./client'] === './lib/client.js',
   'exports the browser half as ./client',
