@@ -257,11 +257,29 @@ which would have been a silent failure rather than an error:
   namespace-scope service; the section slot is declared and rendered by
   `-ui-settings-general`.
 
+**Checked under the real React.** `test/client-render.test.mjs` renders the
+presentation component with React 18.3.1 — the same major version DSH bundles —
+through `react-dom/server`, and asserts the actual markup: the range tabs and
+their active state, the totals, hit rate and call count for each range, today's
+block surviving a year-range selection, the year heat grid (one cell per day plus
+five legend swatches), the month grid (every day of March), the week bars (seven,
+with inline heights), bounded heat levels drawn from a five-entry palette,
+proportional model bars, and the loading, error, stale and empty states. It also
+captures `console.error` and `console.warn` and **fails if React complained at
+all**, which is what catches an invalid DOM prop or a hook-order violation — the
+class of defect a hand-rolled `createElement` accepts silently.
+
+React is a devDependency, so this runs in CI and under `prepublishOnly`. Without
+it installed the file skips with a stated reason rather than failing, which keeps
+`npm test` working from a fresh clone with no network.
+
 **Not checked.** Whether the shell accepts the registration at runtime, whether
 the section appears in the sidebar, and how any of it looks. There is no browser
-in this environment and React is supplied by the client loader rather than
-installed, so the render tree is exercised through a stand-in rather than a real
-reconciler. The remaining risk is visual and first-run, not contractual.
+in this environment, so nothing here exercises the client module loader itself,
+the slot registry, or the settings shell — the registration is asserted against
+the shapes those read out of DSH's source, and the component is asserted against
+real React, but the two are never joined by anything that runs. The remaining
+risk is integration and visual: a first-run surprise, not a contractual one.
 
 ## Not verified
 

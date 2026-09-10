@@ -35,6 +35,13 @@ jobs:
       - name: Show the runtime
         run: node --version
 
+      # The two devDependencies are react and react-dom, and they exist only so
+      # the browser half can be rendered and asserted under the real library.
+      # They are never installed for a consumer of this package: it ships with no
+      # dependencies, no peer dependencies and no install scripts.
+      - name: Install test-only React
+        run: npm install --no-audit --no-fund
+
       - name: Test
         run: npm test
 

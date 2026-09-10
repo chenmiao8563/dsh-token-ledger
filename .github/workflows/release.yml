@@ -24,11 +24,15 @@ jobs:
       - uses: actions/checkout@v4
 
       # No dependency cache on purpose: a release build should not be able to
-      # resolve anything stale, and this package has no dependencies anyway.
+      # resolve anything stale. The only dependencies are the two test-only
+      # React packages, and the package itself ships with none.
       - uses: actions/setup-node@v4
         with:
           node-version: '22.x'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Install test-only React
+        run: npm install --no-audit --no-fund
 
       - name: Test
         run: npm test

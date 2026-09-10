@@ -213,13 +213,23 @@ The ledger file is left alone on purpose — delete
 ## Development
 
 ```bash
-npm test            # 49 tests, no dependencies to install
+npm install         # two devDependencies: react and react-dom, for the render tests
+npm test            # 96 tests
 npm run verify      # packaging invariants (dependency-free, no install scripts, no bare imports)
 ```
 
 `npm test` uses Node's built-in test runner. In a restricted environment where
 spawning a child process per test file is blocked, use
 `npm run test:single-process`.
+
+React is a **devDependency only**. It is never installed for a consumer: the
+package ships with no dependencies, no peer dependencies and no install scripts,
+and `pnpm` does not install a dependency's devDependencies. It is here so the
+browser half can be rendered and asserted under the real library, which catches
+things a stand-in cannot — hook-order violations and invalid DOM props, which
+React reports and a hand-rolled `createElement` silently accepts. Without it
+installed, those render tests skip with a stated reason instead of failing, so
+`npm test` still works from a fresh clone with no network.
 
 See [docs/VERIFICATION.md](docs/VERIFICATION.md) for what was actually verified
 and how, including the evidence behind the fork rule.

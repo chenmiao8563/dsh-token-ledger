@@ -195,12 +195,19 @@ dsh plugin --profile web remove @chenmiao8563/dsh-token-ledger
 ## 开发
 
 ```bash
-npm test            # 49 个测试，无需安装任何依赖
+npm install         # 两个 devDependency：react 与 react-dom，供渲染测试使用
+npm test            # 96 个测试
 npm run verify      # 打包不变式（零依赖、无安装脚本、无裸模块说明符）
 ```
 
 `npm test` 使用 Node 内置测试运行器。在禁止逐文件 spawn 子进程的受限环境里，
 改用 `npm run test:single-process`。
+
+React **只是 devDependency**，消费者永远不会安装它：本包不带任何依赖、任何 peer
+依赖、任何安装脚本，而 pnpm 不会为依赖安装其 devDependencies。它在这里的作用是让
+浏览器端能用**真库**渲染并断言——这能抓到替身抓不到的东西：hook 顺序违规与非法
+DOM 属性，React 会报出来，而手写的 `createElement` 会默默接受。没装它时这些渲染
+测试会带明确原因**跳过而不是失败**，所以全新克隆、无网络也能跑 `npm test`。
 
 实际验证了什么、怎么验证的（包括 fork 规则背后的证据）见
 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
