@@ -17,6 +17,7 @@
     "llm-observability"
   ],
   "license": "MIT",
+  "author": "chenmiao8563 <1420647373@qq.com>",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
