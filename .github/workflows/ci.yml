@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.x is the oldest supported line (the CLI needs zstd frame decoding,
+        # available from 22.15.0); 24.x is current.
+        os: [ubuntu-latest]
+        node: ['22.x', '24.x']
+        include:
+          - os: windows-latest
+            node: '22.x'
+          - os: macos-latest
+            node: '24.x'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Show the runtime
+        run: node --version
+
+      - name: Test
+        run: npm test
+
+      - name: Verify packaging invariants
+        run: npm run verify
+
+  package:
+    name: published contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Pack
+        run: npm pack
+
+      - name: Assert the tarball carries everything an installer needs
+        run: |
+          set -eu
+          tarball=$(ls dsh-token-ledger-*.tgz)
+          echo "packed $tarball"
+          listing=$(tar -tzf "$tarball")
+          for required in \
+            package/package.json \
+            package/lib/index.js \
+            package/lib/cli.js \
+            package/lib/ledger.js \
+            package/lib/session-log.js \
+            package/lib/store.js \
+            package/bin/dsh-token-ledger.mjs \
+            package/cordis.patch.yml \
+            package/README.md \
+            package/README.zh.md \
+            package/LICENSE
+          do
+            echo "$listing" | grep -qx "$required" || { echo "missing from tarball: $required"; exit 1; }
+          done
+          echo "$listing" | grep -q '^package/docs/VERIFICATION.md$' || { echo 'missing docs'; exit 1; }
+          # No test or CI files should ship.
+          if echo "$listing" | grep -qE '^package/(test|\.github)/'; then echo 'tests or workflows leaked into the tarball'; exit 1; fi
+
+      - name: Install the tarball into a throwaway project and run the CLI
+        run: |
+          set -eu
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE"/dsh-token-ledger-*.tgz
+          ./node_modules/.bin/dsh-token-ledger --version
+          ./node_modules/.bin/dsh-token-ledger --help | grep -q audit
+
+      - name: Build a synthetic DSH home and audit it
+        run: |
+          set -eu
+          cd /tmp/consumer
+          node -e '
+            const { mkdirSync, writeFileSync } = require("node:fs");
+            const { zstdCompressSync } = require("node:zlib");
+            const { join } = require("node:path");
+            const home = "/tmp/fake-home";
+            const dir = join(home, "sessions", "--ws--", "sess-demo");
+            mkdirSync(dir, { recursive: true });
+            const events = [
+              { type: "session", version: 0, id: "sess-demo", createdAt: 1, cwd: "/ws" },
+              { type: "request/header", seq: 1, time: Date.now(), data: { header: { config: { provider: "p", model: "m" } } } },
+              { type: "assistant/message", seq: 2, time: Date.now(), data: { turn: 1, step: 1, usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 } } },
+            ];
+            const frames = events.map((e) => zstdCompressSync(Buffer.from(JSON.stringify(e) + "\n")));
+            writeFileSync(join(dir, "session.jsonl.zstd"), Buffer.concat(frames));
+          '
+          ./node_modules/.bin/dsh-token-ledger rebuild --home /tmp/fake-home --write
+          ./node_modules/.bin/dsh-token-ledger audit --home /tmp/fake-home
+          ./node_modules/.bin/dsh-token-ledger summary --home /tmp/fake-home --json | grep -q '"totalTokens": 150'
+          echo "end-to-end install and audit passed"

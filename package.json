@@ -1,0 +1,74 @@
+{
+  "name": "dsh-token-ledger",
+  "version": "0.1.0",
+  "description": "Transparent, auditable token accounting for DeepSeek Harness: a restart-safe ledger over the durable session log, plus a CLI that recomputes it from raw logs and diffs the result.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "cordis",
+    "token-usage",
+    "token-accounting",
+    "usage-stats",
+    "cost-tracking",
+    "ledger",
+    "audit",
+    "llm-observability"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cli": "./lib/cli.js",
+    "./ledger": "./lib/ledger.js",
+    "./session-log": "./lib/session-log.js",
+    "./store": "./lib/store.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-token-ledger": "bin/dsh-token-ledger.mjs"
+  },
+  "files": [
+    "lib/",
+    "bin/",
+    "docs/",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:single-process": "node --test --experimental-test-isolation=none test/*.test.mjs",
+    "verify": "node scripts/verify-package.mjs",
+    "prepublishOnly": "npm run verify && npm test"
+  },
+  "dsh": {
+    "pluginType": "feature",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dsh": ">=0.1.2-alpha.1"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chenmiao8563/dsh-token-ledger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chenmiao8563/dsh-token-ledger/issues"
+  },
+  "homepage": "https://github.com/chenmiao8563/dsh-token-ledger#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

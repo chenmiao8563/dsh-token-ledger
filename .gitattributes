@@ -1,0 +1,8 @@
+# Normalize line endings so a Windows checkout and a Linux CI run agree.
+* text=auto eol=lf
+
+# Keep the line-ending rule away from binary assets.
+*.tgz binary
+*.png binary
+*.jpg binary
+*.ico binary

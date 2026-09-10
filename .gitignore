@@ -1,0 +1,14 @@
+node_modules/
+*.log
+*.tgz
+
+# Local ledgers and exports produced while developing against a real DSH home.
+token-ledger/
+.ledger-local/
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

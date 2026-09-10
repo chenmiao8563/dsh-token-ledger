@@ -1,0 +1,16 @@
+# Bundle patch for `dsh plugin add dsh-token-ledger`.
+#
+# This adds exactly one entry and touches nothing else: no stock component is
+# disabled or replaced, so the ledger can coexist with any other usage,
+# billing or statistics plugin already in the profile.
+#
+# The row's `id` is what a profile-level override would target, e.g.
+#
+#   - id: token-ledger
+#     config:
+#       ledgerPath: /custom/path/ledger.json
+#       backfill: false
+#
+- insert:
+    - id: token-ledger
+      name: 'dsh-token-ledger'
