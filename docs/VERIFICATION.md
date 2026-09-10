@@ -139,6 +139,49 @@ this similarity gate, which runs at publish time. The scoped name was
 re-verified end to end as shown above; the CLI command and Cordis entry id are
 unchanged.
 
+### Install from the npm registry, isolated
+
+The published artifact was installed the way a stranger would install it, into a
+disposable `DSH_HOME`:
+
+```
+$ DSH_HOME=<tmp>/home <dsh-desktop-cli> plugin --profile web add @chenmiao8563/dsh-token-ledger
+dsh: initialized profile web at <tmp>/home/profiles/web
+Progress: resolved 1, reused 0, downloaded 0, added 0
+dependencies:
++ @chenmiao8563/dsh-token-ledger ^0.1.0
+Packages: +1
+Progress: resolved 1, reused 0, downloaded 1, added 1, done
+Done in 2.7s using pnpm v11.8.0
+```
+
+The lockfile records a real registry resolution with its integrity hash and the
+declared engine range:
+
+```
+'@chenmiao8563/dsh-token-ledger@0.1.0':
+  resolution: {integrity: sha512-yApGruS1Hcyq0oIOq8t6Y8gAJFefAoiHLzDsvPsecND6+DIj878x8YtQ5Ggz+PVYL9yTvaPAgIVcOhyBNvPGnw==}
+  engines: {node: '>=22.15.0'}
+  hasBin: true
+```
+
+The reconciler added it to the bundle stack, and `pnpm-workspace.yaml` was left
+untouched — **no `allowBuilds` entry was needed**, which is the installability
+claim this document exists to check:
+
+```json
+"dsh": { "profile": { "bundles": [
+  "@deepseek-ai/dsh-base",
+  "@deepseek-ai/dsh-web-app",
+  "@chenmiao8563/dsh-token-ledger"
+] } }
+```
+
+The packument itself took roughly two minutes to become readable after the first
+publish in the new scope — during that window `dist-tags` and the tarball were
+already live while `GET /@chenmiao8563%2Fdsh-token-ledger` still returned 404.
+That is registry propagation, not a failed publish.
+
 ### Note for whoever verifies this next
 
 On this machine the `dsh` shell shim hardcodes `DSH_HOME`, so exporting
