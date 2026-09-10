@@ -223,6 +223,90 @@ test('a restarted plugin resumes from the stored cursor', async () => {
   }
 })
 
+/**
+ * Regression: the command registry requires `input` to be an object carrying a
+ * non-empty `hint` string. Registering a bare string threw
+ * `TypeError: command "tokens" input hint must be a string` inside the mount,
+ * which aborted the rest of `apply()` — the command never registered, and the
+ * flush-on-dispose effect was never installed either. Nothing but a live host
+ * surfaced this, so the contract is asserted here.
+ */
+test('the /tokens definition satisfies the command registry contract', async () => {
+  const mounted = await mount()
+  try {
+    const command = mounted.commands.find((definition) => definition.name === 'tokens')
+    assert.ok(command !== undefined, 'no command was registered')
+    assert.match(command.name, /^[a-z]+$/)
+    assert.equal(typeof command.description, 'string')
+    assert.ok(command.description.trim() !== '')
+    assert.equal(typeof command.handler, 'function')
+    assert.equal(typeof command.input, 'object', 'input must be an object, not a bare string')
+    assert.equal(typeof command.input.hint, 'string')
+    assert.ok(command.input.hint.trim() !== '', 'input.hint must not be empty')
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+/**
+ * Regression: a fork whose declared count cannot index the array it arrived
+ * with must be folded whole and warned about. Refusing it loses the session's
+ * own usage silently; folding it whole over-counts the parent prefix, which the
+ * warning makes visible.
+ */
+test('a fork with an unusable declared cut is folded whole, with a warning', async () => {
+  const persistence = {
+    list: async () => [{ id: 'sess-fork' }],
+    inspect: async () => ({
+      meta: { id: 'sess-fork', parentSession: 'sess-parent' },
+      // Logical-event coordinates, against a much shorter row-form array.
+      inheritedEventCount: 13757,
+      events: withSeq(ALPHA_EVENTS),
+    }),
+  }
+  const mounted = await mount({ persistence })
+  try {
+    await mounted.harness.dispose()
+    const snapshot = loadLedger(ledgerPaths(mounted.home, {}).ledger)
+    // Folded whole rather than zeroed.
+    assert.equal(snapshot.totals.totalTokens, 6220)
+    assert.ok(
+      mounted.harness.logs.some(
+        ([level, args]) => level === 'warn' && String(args[0]).includes('no usable inheritance boundary'),
+      ),
+      JSON.stringify(mounted.harness.logs),
+    )
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+test('a fork carrying its boundary marker is cut after it', async () => {
+  const events = withSeq([
+    { type: 'session', id: 'sess-fork', parentSession: 'sess-parent' },
+    BETA_EVENTS[2],
+    { type: 'session/end-seed', time: DAY3, data: {} },
+    BETA_EVENTS[4],
+  ])
+  const persistence = {
+    list: async () => [{ id: 'sess-fork' }],
+    inspect: async () => ({ meta: { id: 'sess-fork', parentSession: 'sess-parent' }, inheritedEventCount: 13757, events }),
+  }
+  const mounted = await mount({ persistence })
+  try {
+    await mounted.harness.dispose()
+    const snapshot = loadLedger(ledgerPaths(mounted.home, {}).ledger)
+    // Only the post-marker call, even though the declared count overshoots.
+    assert.equal(snapshot.totals.totalTokens, 15)
+    assert.ok(
+      !mounted.harness.logs.some(([level, args]) => level === 'warn' && String(args[0]).includes('inheritance boundary')),
+      'a marker was present, so no warning was expected',
+    )
+  } finally {
+    mounted.cleanup()
+  }
+})
+
 test('/tokens answers summary, path, json and export', async () => {
   const mounted = await mount()
   try {

@@ -311,7 +311,7 @@ test('forked logs without a marker are folded whole and warned about', () => {
   try {
     const rebuilt = invoke(['rebuild', '--home', home])
     assert.equal(rebuilt.code, 0)
-    assert.match(rebuilt.stderr, /has no session\/end-seed marker/)
+    assert.match(rebuilt.stderr, /has no usable inheritance boundary/)
     assert.match(rebuilt.stdout, /11/)
   } finally {
     cleanup()

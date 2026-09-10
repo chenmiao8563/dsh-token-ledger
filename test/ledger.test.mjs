@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { UsageLedger, countersFromUsage, dateKeyOf, emptyCounters } from '../lib/ledger.js'
+import { UsageLedger, countersFromUsage, dateKeyOf, emptyCounters, inheritedCut, isForkSession } from '../lib/ledger.js'
 import {
   ALPHA_EVENTS,
   ALPHA_EXPECTED,
@@ -211,6 +211,12 @@ test('restore rejects foreign or incompatible snapshots', () => {
   assert.equal(ledger.restore(undefined), false)
   assert.equal(ledger.restore(null), false)
   assert.equal(ledger.restore({ version: 999 }), false)
+  // A ledger written before the counting rule was fixed must be discarded, not
+  // trusted: its cursors would keep the mis-counted totals forever.
+  const legacy = new UsageLedger().snapshot()
+  legacy.version = 1
+  ledger.totals.totalTokens = 123
+  assert.equal(ledger.restore(legacy), false)
   assert.equal(ledger.totals.totalTokens, 0)
 })
 
@@ -244,6 +250,68 @@ test('format renders the totals a user reads', () => {
   assert.match(text, /6,220/)
   assert.match(text, /2026-01-15/)
   assert.match(text, /deepseek-official\/deepseek-v4-flash/)
+})
+
+test('inheritedCut locates a fork boundary by the marker, not by a count', () => {
+  const events = [
+    { type: 'session', id: 'child' },
+    { type: 'assistant/message', time: DAY1, data: { turn: 1, step: 1, usage: { inputTokens: 999 } } },
+    { type: 'session/end-seed', time: DAY1, data: {} },
+    { type: 'assistant/message', time: DAY1, data: { turn: 2, step: 1, usage: { inputTokens: 5 } } },
+  ]
+
+  // A resume folds in full, whatever number storage offers.
+  assert.equal(inheritedCut({ header: { id: 'x' }, events, inheritedEventCount: 2 }), 0)
+
+  // A fork cuts after the marker, and the declared count cannot override it.
+  assert.equal(inheritedCut({ header: { parentSession: 'p' }, events, inheritedEventCount: 2 }), 3)
+  assert.equal(inheritedCut({ header: { parentSession: 'p' }, events, inheritedEventCount: 9999 }), 3)
+
+  // No marker: a declared count is used only when it can index this list.
+  const noMarker = events.filter((event) => event.type !== 'session/end-seed')
+  assert.equal(inheritedCut({ header: { parentSession: 'p' }, events: noMarker, inheritedEventCount: 2 }), 2)
+  assert.equal(inheritedCut({ header: { parentSession: 'p' }, events: noMarker, inheritedEventCount: 9999 }), 0)
+  assert.equal(inheritedCut({ header: { parentSession: 'p' }, events: [] }), 0)
+  assert.equal(inheritedCut(), 0)
+})
+
+test('isForkSession separates forks from resumes', () => {
+  assert.equal(isForkSession({ parentSession: 'p' }), true)
+  assert.equal(isForkSession({}), false)
+  assert.equal(isForkSession(undefined), false)
+  assert.equal(isForkSession({ parentSession: null }), false)
+})
+
+/**
+ * Regression: a stored session can arrive in the compact row form, where the
+ * declared inherited count is expressed in logical-event coordinates and
+ * overshoots the array length by an order of magnitude. Treating it as an array
+ * index skipped the entire session, which under-counted a real home by hundreds
+ * of millions of tokens. The session's own usage must survive.
+ */
+test('a fork whose declared count overshoots the array is still counted', () => {
+  const records = withSeq([
+    { type: 'session', id: 'child', parentSession: 'parent', seedLength: 13757 },
+    // The parent's history, as the compact row form presents it.
+    { type: 'assistant/message', time: DAY1, data: { turn: 1, step: 1, usage: { inputTokens: 400000, outputTokens: 1 } } },
+    { type: 'text-chunks', time: DAY1, data: { texts: ['a', 'b'] } },
+    { type: 'session/end-seed', time: DAY1, data: {} },
+    // The child's own call, which must be counted.
+    { type: 'assistant/message', time: DAY1, data: { turn: 2, step: 1, usage: { inputTokens: 700, outputTokens: 30 } } },
+  ])
+
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({
+    sessionId: 'child',
+    events: records,
+    inheritedEventCount: inheritedCut({
+      header: records[0],
+      events: records,
+      inheritedEventCount: records[0].seedLength,
+    }),
+  })
+  assert.equal(ledger.totals.totalTokens, 730)
+  assert.equal(ledger.calls, 1)
 })
 
 /** Deterministic PRNG so the property-style check is reproducible. */

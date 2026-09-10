@@ -194,18 +194,43 @@ $env:DSH_HOME = '<tmp>\home'
 & '<install>\DSH Desktop.exe' --expose-internals '<install>\resources\app.asar\lib\desktop-cli.js' plugin --profile web add <path>
 ```
 
+## Live host mount
+
+Version 0.1.0 was installed into a real desktop profile, the host was restarted,
+and the host log recorded the mount:
+
+```
+20:24:52 [I] [token-ledger] started a new ledger at <DSH_HOME>\token-ledger\ledger.json
+20:24:52 [E] [token-ledger] TypeError: command "tokens" input hint must be a string
+20:25:00 [I] [token-ledger] backfilled 139 stored session(s), 0 unreadable; total 790455336 tokens over 4518 calls
+```
+
+This step was worth doing precisely because it failed. Both defects it exposed
+were unreachable from the 49-test suite, and both are fixed in 0.1.1 with
+regression tests:
+
+| Defect | Evidence | Cause |
+| --- | --- | --- |
+| `/tokens` never registered | the `TypeError` above, and no `command/*` event when `/tokens` was typed | `input` was passed as a bare string; the registry requires `{ hint: string }`. The throw also aborted the rest of `apply()`, so the flush-on-dispose effect was never installed |
+| backfill under-counted forks | 4,518 calls / 790,455,336 tokens against the CLI's 6,901 / 1,205,685,663 on the same logs | the inherited boundary was applied as a raw index, but the row-form log packs several logical events per record, so the declared count overshot the array and skipped those sessions entirely |
+
+The diagnosis came from the ledger's own artifacts rather than from guesswork:
+the host log line above, and a cross-tabulation of the ledger's 65 recorded
+sessions against the 72 logs carrying a `session/end-seed` marker and the 29
+declaring a parent. The 61 sessions outside both sets turned out to be
+four-record logs with no usage at all, which is why they correctly have no entry.
+
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not
 useful:
 
-- **Live in-process mount inside a running DSH host.** The composition is proven
-  (`--dump-config`), and the plugin's behaviour against a Cordis stand-in is
-  covered by tests, but the packaged desktop CLI exposes no way to boot the
-  plugin tree without serving the GUI, so the plugin was not observed mounting
-  inside a real host process, and `/tokens` was not exercised in a live
-  conversation. The remaining risk is confined to the host's exact service
-  contract at mount time, not to the counting logic.
+- **`/tokens` end to end through the GUI.** The command now satisfies the
+  registry contract and is covered by a regression test, but the corrected build
+  has not yet been observed answering `/tokens` in a live conversation.
+- **Backfill parity with the CLI on a real host.** Both paths now share one
+  boundary function, and each is tested, but the backfill's numbers have not
+  been compared against a CLI rebuild on the same host after the 0.1.1 fix.
 - **Any DSH release other than `0.1.2-rc.1`.** The API surface used is stable
   across the `0.1.2` line by inspection, not by test.
 - **Non-Windows platforms.** The logic is platform-independent and CI runs
