@@ -272,6 +272,51 @@ function loadWithSection() {
   }
 }
 
+test('apply still registers the section when locale is unavailable', () => {
+  const module = loadClientModule()
+  const registered = []
+  const ctxEffects = []
+  let injected
+  const ctx = {
+    effect: (factory) => ctxEffects.push(factory()),
+    // No locale service at all, as if the dependency were absent.
+    slots: {
+      inject: (_name, callback) => callback(),
+      register: (options, component) => {
+        registered.push({ options, component })
+        injected = options
+      },
+    },
+  }
+  // A throw here would abort the mount and the section would never appear.
+  module.exports.apply(ctx)
+  assert.equal(registered.length, 1)
+  assert.equal(registered[0].options.name, 'settings.section')
+  // The label must still be a usable string, untranslated rather than missing.
+  assert.equal(registered[0].options.label(), 'nav')
+  // And the optional locale field must be omitted rather than pointing at a
+  // namespace that was never registered.
+  assert.equal('locale' in injected, false)
+  assert.equal(ctxEffects.length, 1, 'only the stylesheet effect remains')
+  assert.equal(typeof ctxEffects[0], 'function')
+})
+
+test('a locale that cannot bind is treated as unavailable, not as fatal', () => {
+  const module = loadClientModule()
+  const registered = []
+  const ctx = {
+    effect: () => {},
+    locale: { register: () => () => {} },
+    slots: {
+      inject: (_name, callback) => callback(),
+      register: (options) => registered.push(options),
+    },
+  }
+  module.exports.apply(ctx)
+  assert.equal(registered.length, 1)
+  assert.equal(registered[0].label(), 'nav')
+})
+
 test('the module registers itself with the client loader under its package name', () => {
   const loaded = loadClientModule()
   assert.equal(loaded.id, '@chenmiao8563/dsh-token-ledger')
