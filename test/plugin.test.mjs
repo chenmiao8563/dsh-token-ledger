@@ -76,9 +76,10 @@ function makeCtx(services = {}) {
  * @param {object} [options.persistence] - a persistence service stand-in.
  * @param {object[]} [options.liveSessions] - sessions `ctx.get('sessions')` should list.
  * @param {object} [options.config] - plugin config.
+ * @param {object} [options.extraServices] - further services, e.g. a `webServer`.
  * @returns {Promise<{ harness: object, home: string, commands: object[], cleanup: () => void }>} the harness.
  */
-async function mount({ persistence, liveSessions = [], config } = {}) {
+async function mount({ persistence, liveSessions = [], config, extraServices = {} } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'token-ledger-plugin-'))
 
   const services = {}
@@ -94,6 +95,7 @@ async function mount({ persistence, liveSessions = [], config } = {}) {
     },
   }
   services.commands = commands
+  Object.assign(services, extraServices)
 
   const previousHome = process.env.DSH_HOME
   process.env.DSH_HOME = home
@@ -301,6 +303,54 @@ test('a fork carrying its boundary marker is cut after it', async () => {
     assert.ok(
       !mounted.harness.logs.some(([level, args]) => level === 'warn' && String(args[0]).includes('inheritance boundary')),
       'a marker was present, so no warning was expected',
+    )
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+test('the settings page route is registered and logged when a web server exists', async () => {
+  const routes = []
+  const disposed = []
+  const mounted = await mount({
+    extraServices: {
+      webServer: {
+        register: (route) => {
+          routes.push(route)
+          return () => disposed.push(route.path)
+        },
+      },
+    },
+  })
+  try {
+    assert.equal(routes.length, 1, 'exactly one route should be registered')
+    assert.equal(routes[0].kind, 'exact')
+    assert.equal(routes[0].path, '/api/token-ledger/summary')
+    assert.equal(typeof routes[0].handler, 'function')
+    // The log line is what the settings page cannot tell the user: from the
+    // browser, "no web server" and "registration failed" look the same.
+    assert.ok(
+      mounted.harness.logs.some(
+        ([level, args]) => level === 'info' && String(args[0]).includes('settings page route ready'),
+      ),
+      JSON.stringify(mounted.harness.logs),
+    )
+    // Disposing the plugin must hand the route back.
+    await mounted.harness.dispose()
+    assert.deepEqual(disposed, ['/api/token-ledger/summary'])
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+test('no web server is not an error: the rest of the plugin still works', async () => {
+  const mounted = await mount()
+  try {
+    assert.ok(mounted.commands.some((command) => command.name === 'tokens'))
+    assert.equal(
+      mounted.harness.logs.some(([, args]) => String(args[0]).includes('overview route failed')),
+      false,
+      'an absent web server must not be reported as a failure',
     )
   } finally {
     mounted.cleanup()
