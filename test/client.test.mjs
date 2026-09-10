@@ -371,8 +371,11 @@ test('a ready payload renders the three ranges, their metrics, today and the cal
   // Today block.
   assert.ok(hasText(text, 'today'))
   assert.ok(hasText(text, '2026-03-10'))
-  // Calendar with one cell per day in the series, plus the legend swatches.
-  assert.equal(countByClass(tree, 'tl-cell'), 10 + 5)
+  // The year heatmap draws one cell per day in the series, plus the month axis
+  // and one legend chip per ramp step.
+  assert.equal(countByExactClass(tree, 'tl-cell'), 10)
+  assert.equal(countByClass(tree, 'tl-axis-label'), 1)
+  assert.equal(countByClass(tree, 'tl-chip'), 7)
   assert.ok(hasText(text, 'byModel'))
   assert.ok(hasText(text, 'deepseek-official/deepseek-v4-flash'))
   assert.ok(hasText(text, 'updatedAt'))
@@ -387,12 +390,13 @@ test('the week view renders one bar per day and drops the heat legend', () => {
   assert.equal(countByClass(tree, 'tl-cell'), 0, 'no heat cells while the bar chart is shown')
 })
 
-test('the month view draws the calendar grid rather than the year grid', () => {
+test('the month view draws thin bars rather than the year grid', () => {
   const { module } = loadWithSection()
   const { tree } = render(module, { status: 'ready', data: payload(), error: null }, { view: 'month' })
-  assert.equal(countByClass(tree, 'tl-month-grid'), 1)
-  // A 31-day March with the 1st on a Sunday leaves six leading blanks.
-  assert.equal(countByClass(tree, 'tl-month-cell'), 31)
+  // The fixture's current month holds the ten days of the series.
+  assert.equal(countByExactClass(tree, 'tl-bar-col'), 10)
+  assert.equal(countByClass(tree, 'tl-grid'), 0, 'no year grid in the month view')
+  assert.equal(countByClass(tree, 'tl-cell'), 0, 'no heat cells in the month view')
 })
 
 test('switching the range reads the matching summary out of the payload', () => {

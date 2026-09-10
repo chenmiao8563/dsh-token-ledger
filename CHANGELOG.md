@@ -8,6 +8,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.3.0] - 2026-09-10
+
+Presentation changes, all of them from looking at the page in a real host.
+
+### Changed
+
+- **The year heatmap is now weekday-aligned and month-labelled.** The series was
+  drawn seven cells per column from whatever weekday it happened to start on, so
+  the rows were weekdays that lied and there was nothing to read the columns
+  against. The first column is now padded to the real weekday of its first day,
+  and a month axis above the grid lines up with it — the two share the same
+  column width and gap rather than being measured into agreement.
+- **The heat ramp goes deeper and has more steps.** Seven levels instead of five,
+  ending in a near-navy rather than saturating at a mid blue, so the busiest days
+  stand out instead of all reading as "dark".
+- **The month view is a bar chart, not a calendar grid**, with thin bars and
+  labels thinned to every fifth day. Bar widths are fixed per view (9px for a
+  month, 26px for a week) because a proportional column made seven bars and
+  thirty bars look like different charts; the week's bars no longer stretch to
+  fill the pane.
+- **The per-model bar shows the composition of the usage.** A single-width fill
+  could not distinguish a model that is mostly cache reads from one that is
+  mostly fresh input, so it is now a stacked bar over the four provider buckets,
+  with a colour key. This is why the overview payload gained fields: the split
+  has to travel, because a total cannot be decomposed in the browser.
+
+### Notes
+
+- Tool calls are **not** a bucket. Provider usage reports uncached input, output,
+  cache read and cache write; tool results arrive as input on the following
+  request, so a "tool tokens" share cannot be measured without inventing one.
+- The ledger format is unchanged, so a 0.2.0 file is still read.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added
@@ -88,7 +121,8 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/chenmiao8563/dsh-token-ledger/releases/tag/v0.1.0

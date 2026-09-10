@@ -142,3 +142,42 @@ test('buildOverview tolerates an empty or malformed snapshot', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(overview)).plugin, 'token-ledger')
   }
 })
+
+test('every model row carries its buckets, not only the total', () => {
+  // The model row draws where the tokens went, so the split has to travel: a
+  // total alone cannot be decomposed in the browser.
+  const snapshot = {
+    daily: [],
+    models: [
+      {
+        model: 'p/m',
+        calls: 3,
+        totalTokens: 1000,
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 840,
+        cacheWriteTokens: 10,
+        reasoningTokens: 7,
+      },
+    ],
+    sessions: [],
+  }
+  const overview = buildOverview(snapshot, { now: NOW })
+  const model = overview.models[0]
+  assert.equal(model.inputTokens, 100)
+  assert.equal(model.outputTokens, 50)
+  assert.equal(model.cacheReadTokens, 840)
+  assert.equal(model.cacheWriteTokens, 10)
+  assert.equal(model.reasoningTokens, 7)
+  assert.equal(model.totalTokens, 1000)
+  // The buckets are what the composition bar stacks, so they must sum to it.
+  assert.equal(model.inputTokens + model.outputTokens + model.cacheReadTokens + model.cacheWriteTokens, model.totalTokens)
+})
+
+test('a model row missing a bucket reports zero rather than undefined', () => {
+  const overview = buildOverview({ daily: [], models: [{ model: 'p/m', totalTokens: 5, inputTokens: 5 }], sessions: [] }, { now: NOW })
+  assert.equal(overview.models[0].outputTokens, 0)
+  assert.equal(overview.models[0].cacheReadTokens, 0)
+  assert.equal(overview.models[0].cacheWriteTokens, 0)
+  assert.equal(overview.models[0].cacheHitRate, 0)
+})

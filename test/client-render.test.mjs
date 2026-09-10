@@ -104,6 +104,20 @@ function countClass(html, className) {
   return (html.match(new RegExp(`class="${className}"`, 'g')) ?? []).length
 }
 
+/**
+ * Count occurrences of a class fragment anywhere in a class attribute.
+ *
+ * `countClass` matches the attribute exactly, which is what a count of real
+ * calendar cells needs; this one is for namespaced families such as `tl-bar-*`.
+ *
+ * @param {string} html - the markup.
+ * @param {string} fragment - the class fragment.
+ * @returns {number} the count.
+ */
+function countByClass(html, fragment) {
+  return (html.match(new RegExp(`class="[^"]*${fragment}[^"]*"`, 'g')) ?? []).length
+}
+
 /** A ready payload with ten days of data. */
 function payload() {
   const series = []
@@ -132,7 +146,7 @@ function payload() {
     },
     today: { date: '2026-03-10', totals: { ...totals, totalTokens: 1000 }, calls: 10, activeDays: 1, cacheHitRate: 0.9 },
     series,
-    models: [{ model: 'deepseek-official/deepseek-v4-flash', calls: 55, totalTokens: 5500, cacheReadTokens: 4950, inputTokens: 550, cacheHitRate: 0.9 }],
+    models: [{ model: 'deepseek-official/deepseek-v4-flash', calls: 55, totalTokens: 5500, cacheReadTokens: 4950, inputTokens: 495, outputTokens: 55, cacheWriteTokens: 0, reasoningTokens: 7, cacheHitRate: 0.9 }],
     sessionCount: 3,
   }
 }
@@ -175,26 +189,44 @@ test('today renders separately from the selected range', { skip }, () => {
   assert.ok(html.includes('today'), 'the today heading survives a year-range selection')
 })
 
-test('the calendar switches between a heat grid, a month grid and bars', { skip }, () => {
+test('the year view is a weekday-aligned heatmap with a month axis', { skip }, () => {
+  const exports = loadClient()
+  const { html, complaints } = renderView(exports, { state: ready, view: 'year' })
+  assert.deepEqual(complaints, [])
+
+  assert.equal(countClass(html, 'tl-grid'), 1)
+  // Ten day cells, and one legend chip per ramp step.
+  assert.equal(countClass(html, 'tl-cell'), 10)
+  assert.equal(countByClass(html, 'tl-chip'), 7)
+  // 2026-03-01 is a Sunday, so the first column is padded by six blanks; without
+  // them every row would be a weekday that lies and the axis would point at the
+  // wrong columns.
+  assert.equal(countByClass(html, 'tl-blank'), 6)
+  // One axis label per month in the window, and the text comes from the
+  // dictionary rather than from the date string.
+  assert.equal(countByClass(html, 'tl-axis-label'), 1)
+  assert.ok(html.includes('>m3<'), 'March is labelled through the dictionary')
+})
+
+test('the month and week views are both bar charts, with different bar widths', { skip }, () => {
   const exports = loadClient()
 
-  const year = renderView(exports, { state: ready, view: 'year' })
-  // Ten series days plus the five legend swatches.
-  assert.equal(countClass(year.html, 'tl-cell'), 15)
-  assert.ok(year.html.includes('tl-grid'))
-
   const month = renderView(exports, { state: ready, view: 'month' })
-  assert.equal(countClass(month.html, 'tl-month-grid'), 1)
-  assert.equal(countClass(month.html, 'tl-month-cell'), 31, 'every day of March is a cell')
-  // The year grid is gone; the five `tl-cell` swatches left are the legend,
-  // which both heat views share.
-  assert.equal(countClass(month.html, 'tl-grid'), 0, 'no year grid while the month grid is shown')
-  assert.equal(countClass(month.html, 'tl-cell'), 5, 'only the legend swatches remain')
+  assert.equal(countByClass(month.html, 'tl-bar-col'), 10, 'one bar per day of the current month')
+  // The width is fixed at 9px for a month and 26px for a week: a proportional
+  // column would make seven bars and thirty bars look like different charts.
+  assert.ok(/flex:\s*0\s+0\s+9px/.test(month.html), 'month bars are thin')
+  assert.equal(countByClass(month.html, 'tl-grid'), 0, 'no heat grid in the month view')
+  assert.equal(countClass(month.html, 'tl-cell'), 0, 'no heat cells and no legend in the month view')
+  assert.ok(month.html.includes('monthChart'))
+  // Labels are thinned out, so thirty bars do not stack thirty labels.
+  assert.ok(countByClass(month.html, 'tl-bar-blank') > 0, 'month labels are sparse')
 
   const week = renderView(exports, { state: ready, view: 'week' })
-  assert.equal(countClass(week.html, 'tl-bar'), 7, 'one bar per day')
-  assert.equal(countClass(week.html, 'tl-bar-col'), 7)
-  assert.equal(countClass(week.html, 'tl-cell'), 0, 'no heat cells while the bars are shown')
+  assert.equal(countByClass(week.html, 'tl-bar-col'), 7)
+  assert.ok(/flex:\s*0\s+0\s+26px/.test(week.html), 'week bars have a fixed width instead of filling the pane')
+  assert.equal(countByClass(week.html, 'tl-bar-value'), 7, 'the week chart shows its values')
+  assert.equal(countByClass(week.html, 'tl-bar-blank'), 0, 'every week bar is labelled')
   assert.ok(week.html.includes('weekChart'))
   // Bars carry inline heights, so the chart is actually proportional.
   assert.ok(/class="tl-bar" style="height:\d+px"/.test(week.html), 'bars are sized')
@@ -204,11 +236,20 @@ test('heat levels are bounded and relative to the busiest day', { skip }, () => 
   const exports = loadClient()
   const { html } = renderView(exports, { state: ready, view: 'year' })
   const backgrounds = [...html.matchAll(/class="tl-cell" style="background:([^"]+)"/g)].map((match) => match[1])
-  assert.equal(backgrounds.length, 15)
-  // The five legend swatches are the palette; the ten day cells must use it too.
+  assert.equal(backgrounds.length, 10, 'one background per day cell')
+  // The legend chips are the palette; the ten day cells must draw from it too.
   const palette = new Set(backgrounds)
-  assert.ok(palette.size <= 5, `expected at most five levels, saw ${palette.size}`)
+  assert.ok(palette.size <= 7, `expected at most seven levels, saw ${palette.size}`)
   assert.ok(backgrounds.every((value) => /^rgba\(/.test(value)), 'levels are explicit colours')
+  // The ramp reaches a genuinely dark end, which is what makes the busiest days
+  // stand out instead of saturating at a mid blue.
+  assert.ok(
+    backgrounds.some((value) => {
+      const [r, g, b] = value.match(/[\d.]+/g).map(Number)
+      return r < 40 && g < 70 && b > 90
+    }),
+    'the deepest step is dark',
+  )
 })
 
 test('loading, error, stale and empty states all render', { skip }, () => {
@@ -247,11 +288,34 @@ test('loading, error, stale and empty states all render', { skip }, () => {
   assert.deepEqual(empty.complaints, [])
 })
 
-test('the model list is proportional to the largest model', { skip }, () => {
+test('the model rows show where the tokens went, with a key', { skip }, () => {
   const exports = loadClient()
-  const { html } = renderView(exports, { state: ready })
+  const { html, complaints } = renderView(exports, { state: ready })
+  assert.deepEqual(complaints, [])
+
   assert.ok(html.includes('deepseek-official/deepseek-v4-flash'))
-  assert.ok(html.includes('tl-model-fill'))
-  // A single model is the busiest one, so its bar is full width.
-  assert.ok(/class="tl-model-fill" style="width:100%"/.test(html), 'the largest model fills its bar')
+  assert.equal(countByClass(html, 'tl-meter'), 1, 'one composition bar per model')
+  // The fixture model has cache reads, uncached input and output; the empty
+  // cache-write bucket is filtered out rather than drawn at zero width.
+  assert.equal(countByClass(html, 'tl-seg'), 3)
+  assert.ok(html.includes('background:#7fb2ff'), 'cache reads have their own colour')
+  assert.ok(html.includes('background:#2f6fd0'), 'uncached input has its own colour')
+  assert.ok(html.includes('background:#2fa86a'), 'output has its own colour')
+  // Every bucket is named once in the key, whatever the bars happen to contain.
+  // `tl-keys` is the container, so the count is of the exact item class.
+  assert.equal(countClass(html, 'tl-key'), 4)
+  assert.equal(countClass(html, 'tl-swatch'), 4)
+  for (const key of ['cacheReadTokens', 'inputTokens', 'outputTokens', 'cacheWriteTokens']) {
+    assert.ok(html.includes(key), `${key} is named in the key`)
+  }
 })
+
+test('a model with no usage renders an empty meter rather than a broken stack', { skip }, () => {
+  const exports = loadClient()
+  const empty = { ...ready, data: { ...ready.data, models: [{ model: 'unused/model', calls: 0, totalTokens: 0 }] } }
+  const { html, complaints } = renderView(exports, { state: empty })
+  assert.deepEqual(complaints, [])
+  assert.equal(countByClass(html, 'tl-meter'), 1)
+  assert.equal(countByClass(html, 'tl-seg'), 0, 'no segments to draw')
+})
+
