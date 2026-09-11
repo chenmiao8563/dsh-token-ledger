@@ -101,6 +101,21 @@ test('folds a session into exact totals, calls, days and models', () => {
   assert.equal(models[0].calls, ALPHA_EXPECTED.calls)
 })
 
+test('each day records when its last call landed, and a restart keeps it', () => {
+  const original = fold(ALPHA_EVENTS, 'sess-alpha')
+  const lastAt = Object.fromEntries([...original.daily.values()].map((day) => [day.date, day.lastAt]))
+  assert.deepEqual(lastAt, {
+    '2026-01-15': DAY1,
+    '2026-01-16': DAY2,
+    '2026-01-17': DAY3,
+  })
+
+  const restored = new UsageLedger()
+  assert.equal(restored.restore(JSON.parse(JSON.stringify(original.snapshot()))), true)
+  const after = Object.fromEntries([...restored.daily.values()].map((day) => [day.date, day.lastAt]))
+  assert.deepEqual(after, lastAt)
+})
+
 test('a streaming sample is replaced by its final message, not added to it', () => {
   const ledger = fold(ALPHA_EVENTS, 'sess-alpha')
   const step1 = fold(

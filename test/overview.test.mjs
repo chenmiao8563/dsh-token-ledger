@@ -21,10 +21,10 @@ const NOW = new Date(2026, 2, 15, 12, 0, 0)
  *
  * @param {string} date - the day key.
  * @param {number} totalTokens - total for the day.
- * @param {{ calls?: number, inputTokens?: number, cacheReadTokens?: number }} [extra] - overrides.
+ * @param {{ calls?: number, inputTokens?: number, cacheReadTokens?: number, lastAt?: unknown }} [extra] - overrides.
  * @returns {object} the row.
  */
-function row(date, totalTokens, { calls = 1, inputTokens = totalTokens, cacheReadTokens = 0 } = {}) {
+function row(date, totalTokens, { calls = 1, inputTokens = totalTokens, cacheReadTokens = 0, lastAt = null } = {}) {
   return {
     date,
     calls,
@@ -34,6 +34,7 @@ function row(date, totalTokens, { calls = 1, inputTokens = totalTokens, cacheRea
     cacheWriteTokens: 0,
     totalTokens,
     reasoningTokens: 0,
+    lastAt,
   }
 }
 
@@ -64,9 +65,10 @@ test('summarize adds counters and counts only days that spent tokens', () => {
 })
 
 test('buildSeries is contiguous, zero-filled, ascending, and bounded', () => {
+  const lastAt = new Date(2026, 2, 15, 23, 30).getTime()
   const byDay = new Map([
     ['2026-03-13', row('2026-03-13', 100)],
-    ['2026-03-15', row('2026-03-15', 300)],
+    ['2026-03-15', row('2026-03-15', 300, { lastAt })],
   ])
   const series = buildSeries(byDay, NOW)
   assert.deepEqual(
@@ -76,6 +78,10 @@ test('buildSeries is contiguous, zero-filled, ascending, and bounded', () => {
   assert.equal(series[1].totalTokens, 0, 'the missing day is present and zeroed')
   assert.equal(series[1].calls, 0)
   assert.equal(series[2].totalTokens, 300)
+  // The browser turns this into "the day that stopped latest", so it has to
+  // travel with the row; a day with no usage has nothing to report.
+  assert.equal(series[2].lastAt, lastAt)
+  assert.equal(series[1].lastAt, null)
 
   // A limit keeps the newest days, never the oldest.
   const clipped = buildSeries(byDay, NOW, 2)

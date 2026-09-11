@@ -74,6 +74,16 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true && steps.published.outputs.value == 'false'
         run: npm publish --access public
 
+      # The release needs a tarball whether or not this run published one. When
+      # the version is already on the registry the Publish step is skipped, so
+      # nothing else would create the file that `gh release create` attaches —
+      # which is exactly how the v0.1.0 release run failed.
+      - name: Pack the tarball to attach
+        if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true
+        run: |
+          npm pack
+          ls -l *dsh-token-ledger-*.tgz
+
       - name: Pack only
         if: ${{ !startsWith(github.ref, 'refs/tags/v') || inputs.dry-run == true }}
         run: |

@@ -108,7 +108,7 @@ function countClass(html, className) {
  * Count occurrences of a class fragment anywhere in a class attribute.
  *
  * `countClass` matches the attribute exactly, which is what a count of real
- * calendar cells needs; this one is for namespaced families such as `tl-bar-*`.
+ * calendar cells needs; this one is for namespaced families such as `tl-week-*`.
  *
  * @param {string} html - the markup.
  * @param {string} fragment - the class fragment.
@@ -195,61 +195,62 @@ test('the year view is a weekday-aligned heatmap with a month axis', { skip }, (
   assert.deepEqual(complaints, [])
 
   assert.equal(countClass(html, 'tl-grid'), 1)
-  // Ten day cells, and one legend chip per ramp step.
-  assert.equal(countClass(html, 'tl-cell'), 10)
+  // One cell per calendar day in the year, and one legend chip per ramp step.
+  assert.equal(countClass(html, 'tl-cell'), 365)
   assert.equal(countByClass(html, 'tl-chip'), 7)
-  // 2026-03-01 is a Sunday, so the first column is padded by six blanks; without
-  // them every row would be a weekday that lies and the axis would point at the
-  // wrong columns.
-  assert.equal(countByClass(html, 'tl-blank'), 6)
-  // One axis label per month in the window, and the text comes from the
+  // 2026-01-01 is a Thursday, so the first column is padded by three blanks;
+  // without them every row would be a weekday that lies and the axis would
+  // point at the wrong columns.
+  assert.equal(countByClass(html, 'tl-blank'), 3)
+  // One axis label per month of the year, and the text comes from the
   // dictionary rather than from the date string.
-  assert.equal(countByClass(html, 'tl-axis-label'), 1)
+  assert.equal(countByClass(html, 'tl-axis-label'), 12)
   assert.ok(html.includes('>m3<'), 'March is labelled through the dictionary')
 })
 
-test('the month and week views are both bar charts, with different bar widths', { skip }, () => {
+test('the month view is a calendar heatmap and the week view is a row-per-day bar chart', { skip }, () => {
   const exports = loadClient()
 
   const month = renderView(exports, { state: ready, view: 'month' })
-  assert.equal(countByClass(month.html, 'tl-bar-col'), 10, 'one bar per day of the current month')
-  // The width is fixed at 9px for a month and 26px for a week: a proportional
-  // column would make seven bars and thirty bars look like different charts.
-  assert.ok(/flex:\s*0\s+0\s+9px/.test(month.html), 'month bars are thin')
-  assert.equal(countByClass(month.html, 'tl-grid'), 0, 'no heat grid in the month view')
-  assert.equal(countClass(month.html, 'tl-cell'), 0, 'no heat cells and no legend in the month view')
-  assert.ok(month.html.includes('monthChart'))
-  // Labels are thinned out, so thirty bars do not stack thirty labels.
-  assert.ok(countByClass(month.html, 'tl-bar-blank') > 0, 'month labels are sparse')
+  // March 2026: 31 day cells, one header cell per weekday, and six blanks before
+  // the 1st lands on its Sunday column.
+  assert.equal(countClass(month.html, 'tl-month-cell'), 31, 'one cell per day of the current month')
+  assert.equal(countClass(month.html, 'tl-month-weekday'), 7, 'a column per weekday')
+  assert.equal(countClass(month.html, 'tl-month-blank'), 6, 'the first week is padded to the real weekday')
+  assert.equal(countByClass(month.html, 'tl-week-row'), 0, 'no week bars in the month view')
+  assert.equal(countByClass(month.html, 'tl-grid'), 0, 'no year grid in the month view')
+  // The heat legend is shared with the year grid.
+  assert.equal(countByClass(month.html, 'tl-chip'), 7)
 
   const week = renderView(exports, { state: ready, view: 'week' })
-  assert.equal(countByClass(week.html, 'tl-bar-col'), 7)
-  assert.ok(/flex:\s*0\s+0\s+26px/.test(week.html), 'week bars have a fixed width instead of filling the pane')
-  assert.equal(countByClass(week.html, 'tl-bar-value'), 7, 'the week chart shows its values')
-  assert.equal(countByClass(week.html, 'tl-bar-blank'), 0, 'every week bar is labelled')
+  assert.equal(countByClass(week.html, 'tl-week-row'), 7, 'one row per day')
+  assert.equal(countByClass(week.html, 'tl-week-fill'), 7, 'every day draws a proportional bar')
+  assert.equal(countByClass(week.html, 'tl-week-row-today'), 1, 'today is marked')
   assert.ok(week.html.includes('weekChart'))
-  // Bars carry inline heights, so the chart is actually proportional.
-  assert.ok(/class="tl-bar" style="height:\d+px"/.test(week.html), 'bars are sized')
+  // Bars carry inline widths, so the chart is actually proportional.
+  assert.ok(/class="tl-week-fill" style="width:\d+%/.test(week.html), 'bars are sized')
 })
 
 test('heat levels are bounded and relative to the busiest day', { skip }, () => {
   const exports = loadClient()
   const { html } = renderView(exports, { state: ready, view: 'year' })
   const backgrounds = [...html.matchAll(/class="tl-cell" style="background:([^"]+)"/g)].map((match) => match[1])
-  assert.equal(backgrounds.length, 10, 'one background per day cell')
-  // The legend chips are the palette; the ten day cells must draw from it too.
+  assert.equal(backgrounds.length, 365, 'one background per day cell in the year')
+  // The legend chips are the palette; the year cells must draw from it too.
   const palette = new Set(backgrounds)
   assert.ok(palette.size <= 7, `expected at most seven levels, saw ${palette.size}`)
   assert.ok(backgrounds.every((value) => /^rgba\(/.test(value)), 'levels are explicit colours')
-  // The ramp reaches a genuinely dark end, which is what makes the busiest days
-  // stand out instead of saturating at a mid blue.
-  assert.ok(
-    backgrounds.some((value) => {
-      const [r, g, b] = value.match(/[\d.]+/g).map(Number)
-      return r < 40 && g < 70 && b > 90
-    }),
-    'the deepest step is dark',
+  // The ramp must span a real range, or the busiest days stop standing out from
+  // the quiet ones. The check is on the spread rather than on any single colour,
+  // so the palette can be re-tuned without the test pinning a depth or a hue.
+  const sums = backgrounds.map((value) =>
+    value
+      .match(/[\d.]+/g)
+      .slice(0, 3)
+      .map(Number)
+      .reduce((total, channel) => total + channel, 0),
   )
+  assert.ok(Math.max(...sums) - Math.min(...sums) > 200, 'the ramp spans a real range')
 })
 
 test('loading, error, stale and empty states all render', { skip }, () => {

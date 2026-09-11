@@ -125,7 +125,7 @@ function collectText(node) {
  * Count host elements whose className contains a fragment.
  *
  * Substring matching is the right default for namespaced classes, but a prefix
- * like `tl-bar` also matches `tl-bar-col`, so exact counting is available too.
+ * like `tl-week` also matches `tl-week-row`, so exact counting is available too.
  *
  * @param {unknown} node - the expanded tree.
  * @param {string} fragment - the class fragment.
@@ -155,6 +155,26 @@ function countByExactClass(node, className) {
 }
 
 /**
+ * Find the first element carrying a class fragment.
+ *
+ * @param {unknown} node - the expanded tree.
+ * @param {string} fragment - the class fragment.
+ * @returns {unknown} the element, or null when nothing matches.
+ */
+function findByClass(node, fragment) {
+  if (node === null || node === undefined || typeof node !== 'object') return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findByClass(child, fragment)
+      if (found !== null) return found
+    }
+    return null
+  }
+  if (String(node.props?.className ?? '').includes(fragment)) return node
+  return findByClass(node.children ?? [], fragment)
+}
+
+/**
  * Whether any rendered string contains a fragment.
  *
  * The collected text is a list of leaf strings, so a substring has to be looked
@@ -177,8 +197,20 @@ function fakeT() {
   return (key) => key
 }
 
-/** A ready payload with two days of data. */
+/**
+ * A ready payload covering 2026-03-01 to 2026-03-10.
+ *
+ * The fixture is built so the month highlights each have one unambiguous
+ * answer: the 1st is a Sunday and the lightest day overall, the 5th is the
+ * last weekday to stop working, and the weekend of the 7th and 8th runs later
+ * still — so a weekend leaking into a weekday highlight fails the test.
+ */
 function payload(overrides = {}) {
+  const lastAt = {
+    5: new Date(2026, 2, 5, 23, 40).getTime(),
+    7: new Date(2026, 2, 7, 23, 50).getTime(),
+    8: new Date(2026, 2, 8, 23, 55).getTime(),
+  }
   const series = []
   for (let day = 1; day <= 10; day += 1) {
     series.push({
@@ -190,6 +222,7 @@ function payload(overrides = {}) {
       cacheWriteTokens: 0,
       totalTokens: day * 100,
       reasoningTokens: 0,
+      lastAt: lastAt[day] ?? new Date(2026, 2, day, 20, 0).getTime(),
     })
   }
   return {
@@ -371,32 +404,70 @@ test('a ready payload renders the three ranges, their metrics, today and the cal
   // Today block.
   assert.ok(hasText(text, 'today'))
   assert.ok(hasText(text, '2026-03-10'))
-  // The year heatmap draws one cell per day in the series, plus the month axis
-  // and one legend chip per ramp step.
-  assert.equal(countByExactClass(tree, 'tl-cell'), 10)
-  assert.equal(countByClass(tree, 'tl-axis-label'), 1)
+  // The year heatmap draws the whole calendar year — one cell per day and one
+  // label per month — plus one legend chip per ramp step.
+  assert.equal(countByExactClass(tree, 'tl-cell'), 365)
+  assert.equal(countByClass(tree, 'tl-axis-label'), 12)
   assert.equal(countByClass(tree, 'tl-chip'), 7)
   assert.ok(hasText(text, 'byModel'))
   assert.ok(hasText(text, 'deepseek-official/deepseek-v4-flash'))
   assert.ok(hasText(text, 'updatedAt'))
 })
 
-test('the week view renders one bar per day and drops the heat legend', () => {
+test('the week view renders one horizontal bar per day and drops the heat legend', () => {
   const { module } = loadWithSection()
   const { tree, text } = render(module, { status: 'ready', data: payload(), error: null }, { view: 'week' })
-  assert.equal(countByExactClass(tree, 'tl-bar'), 7)
-  assert.equal(countByExactClass(tree, 'tl-bar-col'), 7)
+  assert.equal(countByClass(tree, 'tl-week-row'), 7)
+  // Six bare rows plus today's, which carries the extra marker class.
+  assert.equal(countByExactClass(tree, 'tl-week-row'), 6)
+  assert.equal(countByClass(tree, 'tl-week-row-today'), 1)
+  assert.equal(countByClass(tree, 'tl-week-fill'), 7)
   assert.ok(hasText(text, 'weekChart'))
-  assert.equal(countByClass(tree, 'tl-cell'), 0, 'no heat cells while the bar chart is shown')
+  assert.equal(countByClass(tree, 'tl-cell'), 0, 'no heat cells while the bars are shown')
 })
 
-test('the month view draws thin bars rather than the year grid', () => {
+test('the month view draws the current month as a calendar heatmap', () => {
   const { module } = loadWithSection()
   const { tree } = render(module, { status: 'ready', data: payload(), error: null }, { view: 'month' })
-  // The fixture's current month holds the ten days of the series.
-  assert.equal(countByExactClass(tree, 'tl-bar-col'), 10)
+  // March 2026 has 31 days and the 1st is a Sunday, so the first week is padded
+  // by six blanks and the columns stay aligned to their real weekdays.
+  assert.equal(countByExactClass(tree, 'tl-month-cell'), 31)
+  assert.equal(countByExactClass(tree, 'tl-month-blank'), 6)
+  assert.equal(countByExactClass(tree, 'tl-month-weekday'), 7)
+  assert.equal(countByClass(tree, 'tl-week-row'), 0, 'no week bars in the month view')
   assert.equal(countByClass(tree, 'tl-grid'), 0, 'no year grid in the month view')
-  assert.equal(countByClass(tree, 'tl-cell'), 0, 'no heat cells in the month view')
+})
+
+test('the month summary highlights the busiest, lightest and latest day', () => {
+  const { module } = loadWithSection()
+  const { tree } = render(module, { status: 'ready', data: payload(), error: null }, { view: 'month' })
+  // Scoped to the summary block, because today's card renders the same date
+  // string and would otherwise let a wrong highlight pass.
+  const summary = findByClass(tree, 'tl-month-summary')
+  assert.ok(summary !== null, 'the month view has a summary block')
+  assert.equal(countByExactClass(summary, 'tl-metric'), 3)
+  const text = collectText(summary)
+  assert.ok(hasText(text, 'busiestDay') && hasText(text, 'lightestDay') && hasText(text, 'latestDay'))
+  assert.ok(hasText(text, '2026-03-10'), 'the busiest day is the 10th')
+  // The 1st is the lightest day overall and the 7th/8th stop latest, but all
+  // three are weekend days: the weekday rule must skip them.
+  assert.ok(hasText(text, '2026-03-02'), 'the lightest weekday is the 2nd')
+  assert.ok(!hasText(text, '2026-03-01'), 'a weekend day must not win a weekday highlight')
+  assert.ok(hasText(text, '23:40'), 'the latest finish is the 5th at 23:40')
+  assert.ok(!hasText(text, '23:50') && !hasText(text, '23:55'), 'weekend finishes are not highlighted')
+  assert.ok(hasText(text, 'weekdayOnly'))
+})
+
+test('an idle month still names the lightest weekday, but no busiest or latest day', () => {
+  const { module } = loadWithSection()
+  const zeros = payload().series.map((day) => ({ ...day, calls: 0, totalTokens: 0, lastAt: null }))
+  const { tree } = render(module, { status: 'ready', data: payload({ series: zeros }), error: null }, { view: 'month' })
+  const text = collectText(findByClass(tree, 'tl-month-summary'))
+  // Every weekday counts, so an idle month still has a lightest one: the first
+  // elapsed weekday wins the tie.
+  assert.ok(hasText(text, '2026-03-02'), 'the first elapsed weekday is the lightest at zero')
+  assert.ok(!hasText(text, '2026-03-10'), 'a zero day is never the busiest')
+  assert.ok(hasText(text, '—'), 'nothing was busy and nothing ran late')
 })
 
 test('switching the range reads the matching summary out of the payload', () => {

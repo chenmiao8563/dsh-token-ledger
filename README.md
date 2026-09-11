@@ -152,15 +152,17 @@ The browser half adds a **Token ledger** section to the settings sidebar:
   cache hit rate, call count, and the bucket breakdown behind them. The cache hit
   rate is `cacheRead / (cacheRead + uncachedInput)`: the share of input the prompt
   cache absorbed, so a route with no caching reads 0% rather than undefined.
-- **Today, live** — today's tokens, hit rate and calls, which move as steps
-  complete.
+- **Today, live** — today's tokens, hit rate and calls, refreshed once a minute.
 - **A usage calendar** switchable between year, month and week. Year and month are
-  heatmaps; the week view is a bar chart. Heat levels are relative to the busiest
-  day in the window and square-rooted, so one huge day cannot flatten the rest.
+  heatmaps; the week view is one horizontal bar per day. Heat levels are relative
+  to the busiest day in the window and square-rooted, so one huge day cannot
+  flatten the rest. The month view also carries a summary beside the grid: the
+  busiest day, the lightest weekday and the weekday that ran latest (compared by
+  the clock time of the day's last call).
 - **Per model** totals, each with its own hit rate.
 
 The page reads one read-only route, `GET /api/token-ledger/summary`, and polls it
-every 15 seconds. The route refuses a non-loopback peer, so it stays private even
+once a minute. The route refuses a non-loopback peer, so it stays private even
 if the web server is bound to `0.0.0.0`.
 
 It needs a profile with a web server (the `web` or `desktop` profile). Without one,

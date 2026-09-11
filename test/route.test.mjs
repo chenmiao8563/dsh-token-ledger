@@ -29,7 +29,7 @@ function snapshot() {
   const pad = (value) => String(value).padStart(2, '0')
   const key = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
   return {
-    version: 2,
+    version: 3,
     updatedAt: now,
     totals: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 6, reasoningTokens: 0, calls: 1 },
     daily: [{ date: key, calls: 1, inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 6, reasoningTokens: 0 }],
