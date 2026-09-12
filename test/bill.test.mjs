@@ -15,15 +15,19 @@ import { test } from 'node:test'
 import {
   BILL_DIMENSIONS,
   BILL_RANGES,
+  BILL_SECTIONS,
   billToCsv,
   buildBill,
+  buildBillSections,
   costOf,
   entryFor,
   modelMatch,
   modelTokens,
   priceEntries,
   rangeBounds,
+  shortSessionId,
   subscriptionShare,
+  workspaceName,
 } from '../lib/bill.js'
 
 /** Money, to the cent: floating-point sums are never exactly equal. */
@@ -87,10 +91,11 @@ function catalogue(overrides = {}) {
 /** A ledger snapshot in the shape `UsageLedger#snapshot` produces. */
 function snapshot(overrides = {}) {
   return {
-    version: 4,
+    version: 5,
     sessions: [
-      { sessionId: 's1', cwd: 'D:\\proj', calls: 2 },
-      { sessionId: 's2', cwd: 'D:\\other', calls: 1 },
+      { sessionId: 's1', cwd: 'D:\\proj', title: '修复账单导出', calls: 2 },
+      // A session DSH never named falls back to its id rather than to nothing.
+      { sessionId: 's2', cwd: 'D:\\other', title: null, calls: 1 },
     ],
     usage: [
       // DeepSeek, priced in yuan, one call inside the window and one outside it.
@@ -213,13 +218,18 @@ test('a bill groups by workspace, session and model as well', () => {
   assert.equal(project.sessionCount, 1)
   assert.equal(project.modelCount, 2, 'one DeepSeek call and one OpenAI call')
 
+  // A session row is named the way DSH names it: the workspace it ran in, then the
+  // session's own title, with the id kept for the sessions DSH never titled.
   const bySession = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'session', range: 'month', now: SEPTEMBER })
   assert.equal(bySession.rows.length, 2)
-  closeTo(bySession.rows.find((row) => row.label === 's2').cost, 1.4)
+  assert.deepEqual(bySession.rows.map((row) => row.label).sort(), ['other/s2', 'proj/修复账单导出'])
+  assert.ok(bySession.rows.every((row) => String(row.sublabel).includes('D:\\')), 'the id and the full path are in the tooltip')
+  closeTo(bySession.rows.find((row) => row.label === 'other/s2').cost, 1.4)
 
+  // A model row names its vendor as well as the model.
   const byModel = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'model', range: 'month', now: SEPTEMBER })
-  assert.deepEqual(byModel.rows.map((row) => row.label).sort(), ['DeepSeek-V4.1-Flash', 'GPT-6 Astra'], 'the price list names the model')
-  closeTo(byModel.rows.find((row) => row.label === 'DeepSeek-V4.1-Flash').cost, 4.2)
+  assert.deepEqual(byModel.rows.map((row) => row.label).sort(), ['deepseek/DeepSeek-V4.1-Flash', 'openai/GPT-6 Astra'], 'whose model it is, then which model')
+  closeTo(byModel.rows.find((row) => row.label === 'deepseek/DeepSeek-V4.1-Flash').cost, 4.2)
 })
 
 test('only the requested period is billed', () => {
@@ -297,15 +307,53 @@ test('without a rate the bill stays in dollars rather than mixing units', () => 
   closeTo(bill.totals.cost, 10, 'only the dollar-priced usage is counted')
 })
 
-test('the CSV carries the bill, with the currency on every row and a total', () => {
+test('the CSV carries the bill, with the currency on every row and a total per section', () => {
   const bill = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'vendor', range: 'month', now: SEPTEMBER })
   const csv = billToCsv(bill)
   const lines = csv.trim().split('\r\n')
-  assert.equal(lines[0], 'group,calls,inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens,totalTokens,cacheHitRate,cost,currency,billing')
+  assert.equal(lines[0], 'dimension,range,group,calls,cacheReadInput,uncachedInput,output,cacheWriteInput,cacheHitRate,cost,currency,billing,usagePricedCost')
   assert.equal(lines.length, bill.rows.length + 2, 'a header, every row, and a total')
-  assert.ok(lines.at(-1).startsWith('TOTAL,'))
   for (const line of lines.slice(1)) assert.ok(line.includes(',CNY'), `no currency on: ${line}`)
-  assert.equal(lines[1].split(',')[10], 'usage')
+  assert.ok(lines.at(-1).startsWith('vendor,month,TOTAL,'))
+
+  // Rows are ordered by cost, so the dollar-priced vendor comes first.
+  const deepseek = lines.find((line) => line.includes(',deepseek,'))
+  assert.equal(deepseek.split(',')[11], 'usage')
+  // The two input columns are the halves a bill is read by: cache reads first, then
+  // the input that missed the cache — one million tokens on each side of the window.
+  assert.equal(deepseek.split(',')[4], '0', 'no cache-read input in this fixture')
+  assert.equal(deepseek.split(',')[5], '2000000', 'uncached input')
+  // For a pay-as-you-go row the usage-priced cost is the cost.
+  assert.equal(deepseek.split(',')[9], deepseek.split(',')[12])
+})
+
+test('every section totals separately, because ranges overlap', () => {
+  // Summing today, this week, this month and everything would count the same tokens
+  // several times over, so the export totals each section and stops there.
+  const payload = buildBillSections({
+    snapshot: snapshot(),
+    catalogue: catalogue(),
+    dims: ['vendor', 'workspace'],
+    ranges: ['today', 'month', 'all'],
+    now: SEPTEMBER,
+  })
+  assert.deepEqual(payload.dimensions, ['vendor', 'workspace'])
+  assert.deepEqual(payload.ranges, ['today', 'month', 'all'])
+  assert.equal(payload.sections.length, 6, 'two groupings over three ranges')
+  const csv = billToCsv(payload)
+  const lines = csv.trim().split('\r\n').filter((line) => line.includes(',TOTAL,'))
+  assert.equal(lines.length, 6, 'one total per section')
+  assert.deepEqual(
+    lines.map((line) => line.split(',').slice(0, 2).join('/')),
+    ['vendor/today', 'vendor/month', 'vendor/all', 'workspace/today', 'workspace/month', 'workspace/all'],
+  )
+
+  // The notes are shared: the same unpriced model in five ranges is one note.
+  const withUnknown = snapshot({ usage: [...snapshot().usage, usage('2026-09-12', 's1', 'nobody/mystery-1', counters(5_000_000, 0, 0), counters(0, 0, 0), 4)] })
+  const notes = buildBillSections({ snapshot: withUnknown, catalogue: catalogue(), dims: ['vendor'], ranges: ['today', 'week', 'month', 'year', 'all'], now: SEPTEMBER })
+  assert.equal(notes.unpriced.length, 1)
+  assert.equal(notes.sections.length, 5)
+  assert.equal(notes.unpriced[0].tokens, 5_000_000, 'the widest range carries the count that is kept')
 })
 
 test('a plan replaces the usage it covers, on every row that spans it', () => {
@@ -336,12 +384,61 @@ test('a plan replaces the usage it covers, on every row that spans it', () => {
   closeTo(idle.totals.totalCost, 174.2)
 })
 
+test('a plan is allocated across rows, so the rows add up to the total', () => {
+  // One plan covers OpenAI, whose usage appears in both workspaces. Charging the
+  // whole plan to each row would make the rows sum to more than the bill; the plan
+  // is therefore spread in proportion to the usage it covers.
+  const plans = [{ vendor: 'openai', plan: 'GPT plan', amount: 140, currency: 'CNY', startedAt: '2026-09-01' }]
+  const twoSessions = snapshot({
+    sessions: [
+      { sessionId: 's1', cwd: 'D:\\proj', title: '甲', calls: 2 },
+      { sessionId: 's3', cwd: 'D:\\proj', title: '乙', calls: 1 },
+    ],
+    usage: [
+      // Two OpenAI calls in s1 and one in s3: a third of the plan belongs to s3.
+      usage('2026-09-11', 's1', 'openai-official/gpt-6-astra', counters(1_000_000, 0, 0), counters(0, 0, 0)),
+      usage('2026-09-11', 's3', 'openai-official/gpt-6-astra', counters(500_000, 0, 0), counters(0, 0, 0)),
+    ],
+  })
+  const bySession = buildBill({ snapshot: twoSessions, catalogue: catalogue(), subscriptions: plans, by: 'session', range: 'month', now: SEPTEMBER })
+  const first = bySession.rows.find((row) => row.label === 'proj/甲')
+  const second = bySession.rows.find((row) => row.label === 'proj/乙')
+  closeTo(second.cost, 140 / 3, 'the smaller session carries a third of the plan')
+  closeTo(second.planCost, 140 / 3)
+  closeTo(first.cost, (140 * 2) / 3)
+  closeTo(bySession.rows.reduce((sum, row) => sum + row.cost, 0), bySession.totals.totalCost, 'the rows sum to the total')
+  closeTo(bySession.totals.totalCost, 140)
+
+  // The vendor grouping has one row per vendor, so it carries the whole plan.
+  const byVendor = buildBill({ snapshot: twoSessions, catalogue: catalogue(), subscriptions: plans, by: 'vendor', range: 'month', now: SEPTEMBER })
+  closeTo(byVendor.rows.find((row) => row.label === 'openai').cost, 140)
+})
+
+test('every grouping totals to the same bill, row by row', () => {
+  // The four sections are four readings of one bill: whatever they group by, the
+  // rows must add up to the same total.
+  const payload = buildBillSections({
+    snapshot: snapshot(),
+    catalogue: catalogue(),
+    subscriptions: [{ vendor: 'openai', plan: 'GPT plan', amount: 140, currency: 'CNY', startedAt: '2026-09-01' }],
+    dims: ['workspace', 'session', 'model', 'vendor'],
+    ranges: ['month'],
+    now: SEPTEMBER,
+  })
+  const totals = payload.sections.map((section) => section.totals.totalCost)
+  for (const total of totals) closeTo(total, 144.2, 'one bill, four readings')
+  for (const section of payload.sections) {
+    closeTo(section.rows.reduce((sum, row) => sum + row.cost, 0), section.totals.totalCost, `${section.by} rows sum to its total`)
+  }
+})
+
 test('the dimensions and ranges on offer are the documented ones', () => {
-  assert.deepEqual(BILL_DIMENSIONS, ['vendor', 'model', 'workspace', 'session', 'subscription'])
-  assert.deepEqual(BILL_RANGES, ['week', 'month', 'year', 'all'])
+  assert.deepEqual(BILL_DIMENSIONS, ['workspace', 'session', 'model', 'vendor', 'subscription'])
+  assert.deepEqual(BILL_SECTIONS, ['workspace', 'session', 'model', 'vendor'], 'the page stacks four, in this order')
+  assert.deepEqual(BILL_RANGES, ['month', 'year', 'week', 'today', 'all'])
   // An unknown value falls back rather than throwing: a stale link should still bill.
   const bill = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'nonsense', range: 'nonsense', now: SEPTEMBER })
-  assert.equal(bill.by, 'vendor')
+  assert.equal(bill.by, 'workspace', 'the first section is the default grouping')
   assert.equal(bill.range.kind, 'month')
   const month = rangeBounds('month', SEPTEMBER)
   assert.equal(month.from, '2026-09-01')
@@ -349,6 +446,30 @@ test('the dimensions and ranges on offer are the documented ones', () => {
   assert.equal(month.covers('2026-09-15'), true)
   assert.equal(month.covers('2026-08-31'), false)
   assert.equal(rangeBounds('all', SEPTEMBER).covers('1999-01-01'), true, 'everything means everything')
+
+  // `today` is one day, and only that day.
+  const today = rangeBounds('today', SEPTEMBER)
+  assert.equal(today.from, '2026-09-30')
+  assert.equal(today.to, '2026-09-30')
+  assert.equal(today.covers('2026-09-30'), true)
+  assert.equal(today.covers('2026-09-29'), false)
+
+  // Only today's usage is billed by the day range.
+  const daily = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'vendor', range: 'today', now: new Date(2026, 8, 10, 12, 0, 0) })
+  assert.equal(daily.totals.calls, 2, 'the two calls recorded on the 10th')
+  closeTo(daily.totals.totalCost, 4.2)
+  const empty = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'vendor', range: 'today', now: SEPTEMBER })
+  assert.equal(empty.totals.calls, 0)
+})
+
+test('a session row is named by its workspace, and a model row by its vendor', () => {
+  assert.equal(workspaceName('E:\\bosc_project\\torchv-master'), 'torchv-master')
+  assert.equal(workspaceName('E:\\bosc_project\\torchv-master\\'), 'torchv-master')
+  assert.equal(workspaceName('/home/me/proj'), 'proj')
+  assert.equal(workspaceName(''), null)
+  assert.equal(workspaceName(undefined), null)
+  assert.equal(shortSessionId('session-54da1581-cfde-4529-b92b-bc94a58254f2'), 'session-54da1')
+  assert.equal(shortSessionId('abc'), 'abc')
 })
 
 test('an empty ledger bills nothing rather than failing', () => {

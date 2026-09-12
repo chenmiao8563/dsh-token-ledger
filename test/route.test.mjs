@@ -33,20 +33,58 @@ function fakeLedger(snapshot) {
   return { snapshot }
 }
 
+/** A local calendar day as `YYYY-MM-DD`. */
+function dayKeyOf(date) {
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
 /** A minimal snapshot with one day of usage. */
 function snapshot() {
   const now = Date.now()
-  const date = new Date(now)
-  const pad = (value) => String(value).padStart(2, '0')
-  const key = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  const key = dayKeyOf(new Date(now))
   return {
-    version: 3,
+    version: 5,
     updatedAt: now,
     totals: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 6, reasoningTokens: 0, calls: 1 },
     daily: [{ date: key, calls: 1, inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 6, reasoningTokens: 0 }],
     models: [],
     sessions: [],
     cursors: {},
+  }
+}
+
+/**
+ * A snapshot with both a daily series and a usage cross table.
+ *
+ * The overview reads `daily`; the cost it shows beside those totals is computed
+ * from `usage`, so a fixture for a priced overview has to carry both — and they
+ * have to fall on the same day as the route's clock, or the day's cost is zero.
+ *
+ * @param {string} [date] - the local day to put the usage on.
+ * @returns {object} the snapshot.
+ */
+function overviewSnapshot(date = dayKeyOf(new Date())) {
+  const counters = { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 1_000_000, reasoningTokens: 0 }
+  return {
+    version: 5,
+    updatedAt: Date.now(),
+    totals: { ...counters, calls: 1 },
+    daily: [{ date, calls: 1, ...counters }],
+    models: [],
+    sessions: [{ sessionId: 's1', cwd: 'D:\\proj', title: '工作', calls: 1 }],
+    cursors: {},
+    usage: [
+      {
+        date,
+        sessionId: 's1',
+        model: 'acme-official/one',
+        calls: 1,
+        ...counters,
+        peak: { ...counters },
+        offPeak: { ...counters, inputTokens: 0, totalTokens: 0 },
+      },
+    ],
   }
 }
 
@@ -568,22 +606,48 @@ test('a bill is served as uncacheable JSON, grouped and ranged by the query', ()
   assert.equal(res.headers['cache-control'], 'no-store')
   const body = JSON.parse(res.body)
   assert.equal(body.plugin, 'token-ledger')
-  assert.equal(body.by, 'workspace')
-  assert.equal(body.range.kind, 'all')
-  assert.deepEqual(body.rows.map((row) => row.label), ['D:\\proj'])
-  assert.equal(body.rows[0].calls, 3)
-  assert.equal(body.totals.calls, 3)
+  assert.deepEqual(body.dimensions, ['workspace'])
+  assert.deepEqual(body.ranges, ['all'])
+  assert.equal(body.sections.length, 1)
+  const section = body.sections[0]
+  assert.equal(section.by, 'workspace')
+  assert.equal(section.range.kind, 'all')
+  assert.deepEqual(section.rows.map((row) => row.label), ['D:\\proj'])
+  assert.equal(section.rows[0].calls, 3)
+  assert.equal(section.totals.calls, 3)
   // 1M input at 1 USD per million, converted at the rate on the catalogue.
-  assert.equal(body.totals.totalCost, 7)
-  assert.equal(body.totals.usageCost, 7, 'with no plan the two agree')
+  assert.equal(section.totals.totalCost, 7)
+  assert.equal(section.totals.usageCost, 7, 'with no plan the two agree')
   assert.equal(body.currency, 'CNY')
 })
 
-test('the default bill is by vendor over the month, with no query at all', () => {
+test('the page asks for one section at a time, and the export asks for all of them', () => {
+  // One grouping over one range: what a section card fetches.
+  const one = JSON.parse(call(billRoute(), makeBillReq({ url: `${BILL_PATH}?by=session&range=today` })).body)
+  assert.deepEqual(one.dimensions, ['session'])
+  assert.deepEqual(one.ranges, ['today'])
+  assert.equal(one.sections.length, 1)
+  // A session row is named the way the page shows it: workspace, then DSH's title.
+  assert.equal(one.sections[0].rows[0].label, 'proj/s1')
+
+  // Every grouping over every range: what the export fetches. Four times five, and
+  // the shared notes stated once.
+  const all = JSON.parse(call(billRoute(), makeBillReq({ url: `${BILL_PATH}?by=workspace,session,model,vendor&range=month,year,week,today,all` })).body)
+  assert.deepEqual(all.dimensions, ['workspace', 'session', 'model', 'vendor'])
+  assert.deepEqual(all.ranges, ['month', 'year', 'week', 'today', 'all'])
+  assert.equal(all.sections.length, 20)
+  assert.deepEqual(
+    all.sections.slice(0, 5).map((section) => `${section.by}/${section.range.kind}`),
+    ['workspace/month', 'workspace/year', 'workspace/week', 'workspace/today', 'workspace/all'],
+  )
+})
+
+test('the default request is every section over the month', () => {
   const body = JSON.parse(call(billRoute(), makeBillReq()).body)
-  assert.equal(body.by, 'vendor')
-  assert.equal(body.range.kind, 'month')
-  assert.deepEqual(body.rows.map((row) => row.label), ['acme'])
+  assert.deepEqual(body.dimensions, ['workspace', 'session', 'model', 'vendor'])
+  assert.deepEqual(body.ranges, ['month'])
+  assert.equal(body.sections.length, 4)
+  assert.deepEqual(body.sections.map((section) => section.by), ['workspace', 'session', 'model', 'vendor'])
 })
 
 test('an unknown dimension or range bills the default rather than failing', () => {
@@ -591,33 +655,40 @@ test('an unknown dimension or range bills the default rather than failing', () =
   const res = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?by=nonsense&range=nonsense` }))
   assert.equal(res.status, 200)
   const body = JSON.parse(res.body)
-  assert.equal(body.by, 'vendor')
-  assert.equal(body.range.kind, 'month')
+  assert.deepEqual(body.dimensions, ['workspace', 'session', 'model', 'vendor'])
+  assert.deepEqual(body.ranges, ['month'])
+  // A list with one good value and one stale one keeps the good one.
+  const mixed = JSON.parse(call(billRoute(), makeBillReq({ url: `${BILL_PATH}?by=session,nonsense&range=today,lastweek` })).body)
+  assert.deepEqual(mixed.dimensions, ['session'])
+  assert.deepEqual(mixed.ranges, ['today'])
 })
 
 test('format=csv returns a downloadable attachment, not JSON', () => {
-  const res = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=vendor` }))
+  const res = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=vendor&range=month` }))
   assert.equal(res.status, 200)
   assert.match(res.headers['content-type'], /text\/csv/)
-  assert.equal(res.headers['content-disposition'], 'attachment; filename="token-bill-vendor-2026-09-30.csv"')
+  assert.equal(res.headers['content-disposition'], 'attachment; filename="token-bill-vendor-month-2026-09-30.csv"')
   assert.equal(res.headers['cache-control'], 'no-store')
   const lines = res.body.trim().split('\r\n')
   assert.equal(lines.length, 3, 'a header, the one vendor and the total')
-  assert.ok(lines[0].startsWith('group,calls,'))
-  assert.ok(lines.at(-1).startsWith('TOTAL,'))
+  assert.ok(lines[0].startsWith('dimension,range,group,'))
+  assert.ok(lines.at(-1).startsWith('vendor,month,TOTAL,'))
 
-  // The attachment name follows the grouping it was asked for.
-  const bySession = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=session` }))
-  assert.equal(bySession.headers['content-disposition'], 'attachment; filename="token-bill-session-2026-09-30.csv"')
+  // The attachment name follows what was asked for, and a whole export says so.
+  const bySession = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=session&range=today` }))
+  assert.equal(bySession.headers['content-disposition'], 'attachment; filename="token-bill-session-today-2026-09-30.csv"')
+  const everything = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=workspace,session,model,vendor&range=month,year,week,today,all` }))
+  assert.equal(everything.headers['content-disposition'], 'attachment; filename="token-bill-all-2026-09-30.csv"')
+  assert.equal(everything.body.trim().split('\r\n').length, 1 + 20 * 2, 'a header, one row and one total per section')
 })
 
 test('a CSV export is the same arithmetic the page shows', () => {
   const route = billRoute()
-  const json = JSON.parse(call(route, makeBillReq()).body)
-  const csv = call(route, makeBillReq({ url: `${BILL_PATH}?format=csv` })).body.trim().split('\r\n')
-  assert.equal(csv.length, json.rows.length + 2)
-  const total = csv.at(-1).split(',')
-  assert.equal(Number(total[8]).toFixed(4), Number(json.totals.totalCost).toFixed(4))
+  const json = JSON.parse(call(route, makeBillReq({ url: `${BILL_PATH}?by=vendor&range=month` })).body)
+  const csv = call(route, makeBillReq({ url: `${BILL_PATH}?format=csv&by=vendor&range=month` })).body.trim().split('\r\n')
+  assert.equal(csv.length, json.sections[0].rows.length + 2)
+  // The cost column sits after the hit rate; the total is the section's.
+  assert.equal(Number(csv.at(-1).split(',')[9]).toFixed(4), Number(json.sections[0].totals.totalCost).toFixed(4))
 })
 
 test('a bill HEAD request is served', () => {
@@ -680,13 +751,56 @@ test('a bill with plans reports the plan, and keeps the totals honest', () => {
   const body = JSON.parse(call(route, makeBillReq({ url: `${BILL_PATH}?by=subscription&range=month` })).body)
   assert.equal(body.subscriptions.length, 1)
   assert.equal(body.subscriptions[0].share, 100)
-  const planRow = body.rows.find((row) => row.plan === true)
-  const usageRow = body.rows.find((row) => row.plan === false)
+  const section = body.sections[0]
+  const planRow = section.rows.find((row) => row.plan === true)
+  const usageRow = section.rows.find((row) => row.plan === false)
   assert.equal(planRow.cost, 100, 'the plan is what the month cost')
   assert.equal(planRow.usageCost, 7, 'and the usage it covered is beside it, not added to it')
   assert.equal(usageRow.cost, 0, 'nothing is off-plan here')
-  assert.equal(body.totals.totalCost, 100, 'no double counting')
-  assert.equal(body.totals.usageCost, 7)
+  assert.equal(section.totals.totalCost, 100, 'no double counting')
+  assert.equal(section.totals.usageCost, 7)
+})
+
+test('the overview carries what each of its periods cost', () => {
+  const day = '2026-09-30'
+  const route = createOverviewRoute({
+    ledger: { snapshot: () => overviewSnapshot(day) },
+    catalogue: billCatalogue,
+    options: { now: () => new Date(2026, 8, 30, 12, 0, 0) },
+  })
+  const body = JSON.parse(call(route, makeReq()).body)
+  assert.equal(body.cost.priced, true)
+  assert.equal(body.cost.currency, 'CNY')
+  assert.equal(body.cost.rate, 7)
+  // 1M input at 1 USD per million, on the day the fixture bills.
+  assert.equal(body.cost.byRange.today.cost, 7)
+  assert.equal(body.cost.byRange.month.cost, 7)
+  assert.equal(body.cost.byRange.week.cost, 7)
+  assert.equal(body.cost.byRange.year.cost, 7)
+  assert.equal(body.cost.byRange.today.unpricedTokens, 0)
+
+  // Without a catalogue the tokens are still served, with no cost claimed.
+  const bare = JSON.parse(call(createOverviewRoute({ ledger: { snapshot: () => overviewSnapshot(day) } }), makeReq()).body)
+  assert.equal(bare.cost.priced, false)
+  assert.equal(bare.cost.byRange, null)
+  assert.ok(bare.totals.totalTokens > 0, 'the token totals are still there')
+
+  // A pricing fault degrades the cost, not the page.
+  const errors = []
+  const broken = JSON.parse(
+    call(
+      createOverviewRoute({
+        ledger: { snapshot: () => overviewSnapshot(day) },
+        catalogue: () => {
+          throw new Error('cache is corrupt')
+        },
+        options: { onError: (error) => errors.push(error) },
+      }),
+      makeReq(),
+    ).body,
+  )
+  assert.equal(broken.cost.priced, false)
+  assert.equal(errors.length, 1)
 })
 
 test('the rates guard matches the overview guard, on both reads and writes', async () => {

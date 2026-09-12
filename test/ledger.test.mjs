@@ -420,6 +420,40 @@ test('a session can be attributed to the directory it worked in', () => {
   assert.equal(live.snapshot().sessions.find((row) => row.sessionId === 's2').cwd, 'E:\\live')
 })
 
+test('a session keeps the name DSH gave it', () => {
+  // The bill labels a session row with this, so it has to come from the log rather
+  // than from anything the caller supplies. DSH names a session twice: a truncated
+  // first prompt first, then a model-written title, and the later one is the name
+  // the sidebar shows.
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({
+    sessionId: 's1',
+    events: [
+      { type: 'session/created', cwd: 'D:\\proj' },
+      { type: 'session/title', data: { title: '目前我的插件都是放在哪个文', source: { kind: 'fallback' } } },
+      { type: 'session/title', data: { title: '修复账单导出' } },
+      ...withSeq(ALPHA_EVENTS),
+    ],
+  })
+  assert.equal(ledger.snapshot().sessions.find((row) => row.sessionId === 's1').title, '修复账单导出')
+
+  // A session DSH never titled has no title, rather than an empty string the bill
+  // would have to special-case.
+  const untitled = new UsageLedger()
+  untitled.adoptHistory({ sessionId: 's2', events: withSeq(ALPHA_EVENTS) })
+  assert.equal(untitled.snapshot().sessions.find((row) => row.sessionId === 's2').title, null)
+
+  // Blank and non-string titles are ignored rather than stored as a name.
+  const odd = new UsageLedger()
+  odd.adoptHistory({ sessionId: 's3', events: [{ type: 'session/title', data: { title: '   ' } }, { type: 'session/title', data: { title: 42 } }, ...withSeq(ALPHA_EVENTS)] })
+  assert.equal(odd.snapshot().sessions.find((row) => row.sessionId === 's3').title, null)
+
+  // And it survives a restart.
+  const restored = new UsageLedger()
+  assert.equal(restored.restore(ledger.snapshot()), true)
+  assert.equal(restored.snapshot().sessions.find((row) => row.sessionId === 's1').title, '修复账单导出')
+})
+
 test('the time-of-day window is the one the vendor prices by', () => {
   // Beijing weekday 09:00-12:00 and 14:00-18:00: the window DeepSeek halves its
   // price outside of. Read as UTC-shifted wall clock, so the machine's own zone

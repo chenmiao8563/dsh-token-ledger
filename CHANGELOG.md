@@ -4,6 +4,58 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-12
+
+The bill became a page rather than a table: four groupings stacked, each with its
+own period, and one export for all of it — and the overview now says what a period
+cost, next to the tokens it counted.
+
+### Added
+
+- **The bill stacks four groupings instead of switching between them.** Workspace,
+  session, model and vendor are shown one after another, so the same usage can be
+  read from four directions at once. Each section carries **its own period**
+  (本月 / 本年 / 7 天 / **今日** / 全部), and a section that fails to load says so
+  inside its own card rather than blanking the other three.
+- **Today is a period of its own**, for the bill and for the overview's pricing:
+  `range=today` is one day, `from` and `to` the same.
+- **The columns a bill is read by**: the group, the call count, **缓存命中输入**
+  (cache-read input), **未命中输入** (input that missed the cache), output, the cache
+  hit rate, and **实际花费**. Cache-write input is stated under each table rather
+  than as a column that would be a dash almost everywhere.
+- **The export carries everything.** One button at the top right of the page
+  exports every grouping over every period — in CSV with a `dimension,range` pair on
+  every row and **one `TOTAL` per section**. There is deliberately no grand total:
+  today, this week, this month and everything overlap, and summing them would count
+  the same tokens four times. The page says so.
+- **Sessions are named the way DSH names them.** A session row reads `工作区/会话名`
+  — the workspace's last path segment, then the title DSH gave the session. Ledger
+  version 5 records that title from the log's `session/title` event, last one
+  winning, because DSH names a session from a truncated first prompt and then renames
+  it with a model-written title. A session DSH never named falls back to its id, and
+  the full id and path are in the tooltip.
+- **Models are named with their vendor**: `deepseek/DeepSeek-V4.1-Flash` rather than
+  a bare name that does not say whose price it is.
+- **The overview shows 预计花费**, in yuan to two decimals, after the cache hit rate
+  — for the selected range and for today. It is the bill's own arithmetic, called for
+  each of the overview's periods, so the number under 本月 and the bill's month
+  cannot disagree. A host with no prices shows a dash and says why rather than a
+  confident `¥0.00`, and tokens the bill could not price are named under the number
+  they are missing from.
+
+### Changed
+
+- **A plan is allocated across rows rather than charged to each of them.** A monthly
+  plan is one charge, so on a grouping where its vendor appears in several rows it is
+  spread in proportion to the usage it covers. A workspace or session row that
+  touched a plan vendor used to carry the whole plan, which made a section's rows sum
+  to several times its total; every grouping's rows now add up to that grouping's
+  total, checked against the live ledger.
+- **A row billed partly by plan says so**: beside the cost, `其中套餐摊分 ¥…`, the way
+  a plan row already showed `其中覆盖用量 ¥…`.
+- **Ledger version 5**: each session carries the `title` DSH gave it. A version-4
+  ledger is rewritten in the new shape on the next write; `rebuild` does it on demand.
+
 ## [0.5.0] - 2026-09-12
 
 A third view: what the tokens actually cost, grouped the way a bill is read —
@@ -435,7 +487,8 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.2.0...v0.3.0

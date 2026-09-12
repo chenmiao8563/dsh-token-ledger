@@ -495,6 +495,9 @@ test('an offline rates payload renders without a rate and without complaint', { 
 
 /* ------------------------------------------------------------------- bill -- */
 
+/** The groupings the bill stacks, in page order. */
+const BILL_DIMS = ['workspace', 'session', 'model', 'vendor']
+
 /**
  * A ready bill payload.
  *
@@ -502,68 +505,69 @@ test('an offline rates payload renders without a rate and without complaint', { 
  * @returns {object} the payload.
  */
 function billPayload(overrides = {}) {
+  const rows = [
+    {
+      key: 'openai',
+      label: 'openai',
+      sublabel: null,
+      plan: true,
+      covered: true,
+      calls: 12,
+      inputTokens: 1_000_000,
+      outputTokens: 200_000,
+      cacheReadTokens: 500_000,
+      cacheWriteTokens: 0,
+      totalTokens: 1_700_000,
+      cacheHitRate: 0.3333,
+      cost: 140,
+      usageCost: 98.6,
+      unpricedTokens: 0,
+      modelCount: 2,
+      sessionCount: 3,
+    },
+    {
+      key: 'proj/修复导出',
+      label: 'proj/修复导出',
+      sublabel: 'session-54da1581 · D:\\proj',
+      plan: false,
+      covered: false,
+      calls: 4,
+      inputTokens: 400_000,
+      outputTokens: 40_000,
+      cacheReadTokens: 3_000_000,
+      cacheWriteTokens: 12_000,
+      totalTokens: 3_440_000,
+      cacheHitRate: 0.8824,
+      cost: 4.2,
+      usageCost: 4.2,
+      unpricedTokens: 0,
+      modelCount: 3,
+      sessionCount: 2,
+    },
+  ]
+  const totals = {
+    calls: 16,
+    inputTokens: 1_400_000,
+    outputTokens: 240_000,
+    cacheReadTokens: 3_500_000,
+    cacheWriteTokens: 12_000,
+    totalTokens: 5_140_000,
+    cacheHitRate: 0.7143,
+    cost: 144.2,
+    usageCost: 102.8,
+    subscriptionCost: 140,
+    totalCost: 144.2,
+    unpricedCost: false,
+  }
   return {
     plugin: 'token-ledger',
     generatedAt: new Date(2026, 2, 31, 12, 0, 0).getTime(),
-    by: 'vendor',
-    range: { kind: 'month', from: '2026-03-01', to: '2026-03-31' },
+    dimensions: BILL_DIMS,
+    ranges: ['month'],
     currency: 'CNY',
     priceSource: 'modelsdev',
     fxRate: 7.1234,
-    rows: [
-      {
-        key: 'openai',
-        label: 'openai',
-        sublabel: null,
-        plan: true,
-        covered: true,
-        calls: 12,
-        inputTokens: 1_000_000,
-        outputTokens: 200_000,
-        cacheReadTokens: 500_000,
-        cacheWriteTokens: 0,
-        totalTokens: 1_700_000,
-        cacheHitRate: 0.3333,
-        cost: 140,
-        usageCost: 98.6,
-        unpricedTokens: 0,
-        modelCount: 2,
-        sessionCount: 3,
-      },
-      {
-        key: 'D:\\proj',
-        label: 'D:\\proj',
-        sublabel: null,
-        plan: false,
-        covered: false,
-        calls: 4,
-        inputTokens: 400_000,
-        outputTokens: 40_000,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        totalTokens: 440_000,
-        cacheHitRate: 0,
-        cost: 4.2,
-        usageCost: 4.2,
-        unpricedTokens: 0,
-        modelCount: 3,
-        sessionCount: 2,
-      },
-    ],
-    totals: {
-      calls: 16,
-      inputTokens: 1_400_000,
-      outputTokens: 240_000,
-      cacheReadTokens: 500_000,
-      cacheWriteTokens: 0,
-      totalTokens: 2_140_000,
-      cacheHitRate: 0.2632,
-      cost: 144.2,
-      usageCost: 102.8,
-      subscriptionCost: 140,
-      totalCost: 144.2,
-      unpricedCost: false,
-    },
+    sections: [{ by: 'workspace', range: { kind: 'month', from: '2026-03-01', to: '2026-03-31' }, rows, totals, currency: 'CNY' }],
     subscriptions: [{ plan: 'GPT plan', vendor: 'openai', amount: 140, currency: 'CNY', share: 140, months: ['2026-03'], note: null, calls: 12, totalTokens: 1_700_000, cacheHitRate: 0.3333 }],
     unpriced: [],
     joins: [{ model: 'deepseek-official/deepseek-v4-flash', vendor: 'deepseek', price: 'DeepSeek-V4.1-Flash', priceId: 'deepseek-flash', confidence: 'name', matchedOn: 'name+version', tokens: 440_000 }],
@@ -571,107 +575,116 @@ function billPayload(overrides = {}) {
   }
 }
 
-const readyBill = { status: 'ready', data: billPayload(), error: null }
+/**
+ * One fetch state per grouping, all ready on the same payload.
+ *
+ * @param {object} [data] - what every section answers with.
+ * @param {object} [states] - per-grouping overrides.
+ * @returns {object} the `bills` prop.
+ */
+function billStates(data = billPayload(), states = {}) {
+  return Object.fromEntries(BILL_DIMS.map((dim) => [dim, states[dim] ?? { status: 'ready', data, error: null }]))
+}
+
+/** The props the bill view takes, with every period on the month. */
+function billProps(bills = billStates()) {
+  return {
+    bills,
+    ranges: Object.fromEntries(BILL_DIMS.map((dim) => [dim, 'month'])),
+    onRange: () => {},
+  }
+}
+
+/** Count elements whose class attribute is exactly this one. */
+function countExactClass(html, className) {
+  return (html.match(new RegExp(`class="${className}"`, 'g')) ?? []).length
+}
 
 test('the bill view renders under real React without the library objecting', { skip }, () => {
   const exports = loadClient()
   assert.equal(typeof exports.BillView, 'function', 'the view must be exported for this test')
 
-  const { html, complaints } = renderComponent(exports.BillView, {
-    state: readyBill,
-    by: 'vendor',
-    range: 'month',
-    onBy: () => {},
-    onRange: () => {},
-  })
+  const { html, complaints } = renderComponent(exports.BillView, billProps())
   assert.deepEqual(complaints, [], 'React reported a problem with the rendered tree')
   assert.ok(html.startsWith('<div class="tl-root"'), html.slice(0, 80))
-  assert.equal(countClass(html, 'tl-bill-row'), 2)
-  assert.equal(countClass(html, 'tl-bill-head'), 1)
-  assert.equal(countClass(html, 'tl-bill-total'), 1)
-  assert.equal(countClass(html, 'tl-bill-table'), 1)
-  assert.equal(countClass(html, 'tl-tab'), 9, 'five groupings and four periods')
-  assert.equal(countByClass(html, 'tl-badge'), 1, 'only the plan row is badged')
+  assert.equal(countExactClass(html, 'tl-card'), 4, 'one card per grouping')
+  assert.equal(countExactClass(html, 'tl-bill-table'), 4)
+  assert.equal(countClass(html, 'tl-bill-head'), 4)
+  assert.equal(countClass(html, 'tl-bill-total'), 4)
+  // Five periods in each of four sections.
+  assert.equal(countClass(html, 'tl-tab'), 20, 'four period strips of five tabs each')
+  assert.equal(countClass(html, 'tl-tabs'), 4, 'and one strip per section')
 })
 
-test('the export links read the bill route with the grouping and period showing', { skip }, () => {
+test('the export links carry every grouping over every period', { skip }, () => {
   const exports = loadClient()
-  const { html } = renderComponent(exports.BillView, {
-    state: readyBill,
-    by: 'workspace',
-    range: 'year',
-    onBy: () => {},
-    onRange: () => {},
-  })
-  assert.ok(html.includes('href="/api/token-ledger/bill?by=workspace&amp;range=year&amp;format=csv"'), html.match(/href="[^"]*"/g)?.join(' '))
-  assert.ok(html.includes('download="token-bill-workspace-2026-03-31.csv"'))
-  assert.ok(html.includes('href="/api/token-ledger/bill?by=workspace&amp;range=year&amp;format=json"'))
-  assert.ok(html.includes('download="token-bill-workspace-2026-03-31.json"'))
+  const { html } = renderComponent(exports.BillView, billProps())
+  const hrefs = html.match(/href="[^"]*"/g)?.join(' ') ?? ''
+  assert.ok(hrefs.includes('href="/api/token-ledger/bill?by=workspace,session,model,vendor&amp;range=month,year,week,today,all&amp;format=csv"'), hrefs)
+  assert.ok(html.includes('download="token-bill-all-2026-03-31.csv"'))
+  assert.ok(hrefs.includes('format=json'))
+  assert.ok(html.includes('download="token-bill-all-2026-03-31.json"'))
 })
 
-test('the bill shows the money, the hit rate and what it could not price', { skip }, () => {
+test('the bill shows both halves of the input, the money and what went unpriced', { skip }, () => {
   const exports = loadClient()
   const withUnpriced = billPayload({
     unpriced: [{ model: 'nobody/mystery-1', vendor: 'nobody', tokens: 300_000, calls: 2, reason: 'no price for this model' }],
   })
-  const { html, complaints } = renderComponent(exports.BillView, {
-    state: { status: 'ready', data: withUnpriced, error: null },
-    by: 'vendor',
-    range: 'month',
-    onBy: () => {},
-    onRange: () => {},
-  })
+  const { html, complaints } = renderComponent(exports.BillView, billProps(billStates(withUnpriced)))
   assert.deepEqual(complaints, [])
+  // The header names the columns, in the order a bill is read: the group, the
+  // calls, both halves of the input, the output, the hit rate and the cost. The
+  // translator in this test returns its key, so the keys are what to look for.
+  for (const label of ['calls', 'cacheReadTokens', 'inputTokens', 'outputTokens', 'cacheHitRate', 'billCost']) {
+    assert.ok(html.includes(`<span>${label}</span>`), `missing column: ${label}`)
+  }
   assert.ok(html.includes('¥140.00'), 'the plan is what the row costs')
   assert.ok(html.includes('¥144.20'), 'and the total is the bill, not the usage alone')
   assert.ok(html.includes('billCoveredUsage ¥98.60'), 'the usage the plan covers is stated beside it, not added to it')
-  assert.ok(html.includes('33.3%'), 'the hit rate is on the row')
+  assert.ok(html.includes('88.2%'), 'the hit rate is on the row')
+  assert.ok(html.includes('billCacheWrite'), 'cache writes are footnoted rather than dropped')
   assert.ok(html.includes('billUnpriced'))
   assert.ok(html.includes('nobody/mystery-1'))
   assert.ok(html.includes('no price for this model'))
   assert.ok(html.includes('billJoins'), 'a price applied by name is shown rather than trusted')
-  assert.ok(html.includes('DeepSeek-V4.1-Flash') || html.includes('deepseek-flash'))
+  assert.ok(html.includes('deepseek-flash'))
 })
 
-test('a bill in dollars is shown in dollars, and an empty one says so', { skip }, () => {
+test('each section renders its own period, and a failed one keeps the rest', { skip }, () => {
   const exports = loadClient()
-  const dollars = renderComponent(exports.BillView, {
-    state: { status: 'ready', data: billPayload({ currency: 'USD', fxRate: null }), error: null },
-    by: 'vendor',
-    range: 'month',
-    onBy: () => {},
-    onRange: () => {},
-  })
-  assert.deepEqual(dollars.complaints, [])
-  assert.ok(dollars.html.includes('$144.20'), 'the symbol follows the currency the bill is in')
-  assert.ok(!dollars.html.includes('1 USD ='), 'no rate is claimed when there is none')
-
-  const empty = renderComponent(exports.BillView, {
-    state: { status: 'ready', data: billPayload({ rows: [], subscriptions: [], unpriced: [], joins: [], totals: { calls: 0, totalTokens: 0, cost: 0, totalCost: 0, cacheHitRate: null } }), error: null },
-    by: 'vendor',
-    range: 'month',
-    onBy: () => {},
-    onRange: () => {},
-  })
-  assert.deepEqual(empty.complaints, [])
-  assert.ok(empty.html.includes('billEmpty'))
-  assert.equal(countClass(empty.html, 'tl-bill-row'), 0)
-  assert.equal(countClass(empty.html, 'tl-bill-total'), 0)
-})
-
-test('a bill that cannot be read explains itself instead of rendering a table', { skip }, () => {
-  const exports = loadClient()
-  for (const status of ['loading', 'error']) {
-    const { html, complaints } = renderComponent(exports.BillView, {
-      state: { status, data: null, error: status === 'error' ? 'HTTP 500' : null },
-      by: 'vendor',
-      range: 'month',
-      onBy: () => {},
-      onRange: () => {},
-    })
-    assert.deepEqual(complaints, [], status)
-    assert.equal(countClass(html, 'tl-bill-table'), 0)
-    assert.ok(html.includes('HTTP 500') === (status === 'error'))
+  const mixed = {
+    workspace: { status: 'ready', data: billPayload(), error: null },
+    session: { status: 'error', data: null, error: 'HTTP 500' },
+    model: { status: 'stale', data: billPayload(), error: 'network' },
+    vendor: { status: 'ready', data: billPayload({ currency: 'USD', fxRate: null }), error: null },
   }
+  const props = { ...billProps(mixed), ranges: { workspace: 'today', session: 'month', model: 'year', vendor: 'all' } }
+  const { html, complaints } = renderComponent(exports.BillView, props)
+  assert.deepEqual(complaints, [])
+  assert.equal(countExactClass(html, 'tl-card'), 4)
+  // One section failed: three tables are still there, and the failure is inside it.
+  assert.equal(countExactClass(html, 'tl-bill-table'), 3)
+  assert.ok(html.includes('billSectionFailed'))
+  assert.ok(html.includes('HTTP 500'))
+  assert.ok(html.includes('stale'), 'and a stale section says so')
+  // The section that is in dollars renders dollars, not yuan.
+  assert.ok(html.includes('$144.20'))
 })
 
+test('a bill that cannot be read explains itself instead of rendering tables', { skip }, () => {
+  const exports = loadClient()
+  const failed = Object.fromEntries(BILL_DIMS.map((dim) => [dim, { status: 'error', data: null, error: 'HTTP 500' }]))
+  const { html, complaints } = renderComponent(exports.BillView, billProps(failed))
+  assert.deepEqual(complaints, [])
+  assert.equal(countExactClass(html, 'tl-bill-table'), 0)
+  assert.ok(html.includes('billUnavailableReason'))
+  assert.ok(html.includes('billSectionFailed'))
+
+  // An empty period says so rather than drawing a table with no rows.
+  const empty = billPayload({ sections: [{ by: 'workspace', range: { kind: 'month', from: '2026-03-01', to: '2026-03-31' }, rows: [], totals: { calls: 0, totalTokens: 0, totalCost: 0, cacheHitRate: null }, currency: 'CNY' }] })
+  const blank = renderComponent(exports.BillView, billProps(billStates(empty)))
+  assert.deepEqual(blank.complaints, [])
+  assert.ok(blank.html.includes('billSectionEmpty'))
+  assert.equal(countClass(blank.html, 'tl-bill-row'), 0)
+})

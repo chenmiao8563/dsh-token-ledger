@@ -264,6 +264,19 @@ function payload(overrides = {}) {
     series,
     models: [{ model: 'deepseek-official/deepseek-v4-flash', calls: 55, totalTokens: 5500, cacheReadTokens: 4950, inputTokens: 550, cacheHitRate: 0.9 }],
     sessionCount: 3,
+    // What each period cost, priced by the host. The month and the day differ, so a
+    // test can tell which one a metric is reading.
+    cost: {
+      currency: 'CNY',
+      rate: 7.1,
+      priced: true,
+      byRange: {
+        month: { cost: 123.456, usageCost: 120, subscriptionCost: 3.456, unpricedTokens: 0, unpricedCost: false },
+        year: { cost: 223.456, usageCost: 220, subscriptionCost: 3.456, unpricedTokens: 0, unpricedCost: false },
+        week: { cost: 23.456, usageCost: 20, subscriptionCost: 3.456, unpricedTokens: 0, unpricedCost: false },
+        today: { cost: 1.5, usageCost: 1.5, subscriptionCost: 0, unpricedTokens: 0, unpricedCost: false },
+      },
+    },
     ...overrides,
   }
 }
@@ -419,10 +432,11 @@ test('a ready payload renders the three ranges, their metrics, today and the cal
 
   // Range switcher offers exactly the three requested periods.
   for (const key of ['rangeMonth', 'rangeYear', 'rangeWeek']) assert.ok(hasText(text, key), `missing ${key}`)
-  // Metrics: total, cache hit rate, calls.
+  // Metrics: total, cache hit rate, calls, and what the period cost.
   assert.ok(hasText(text, 'totalTokens'))
   assert.ok(hasText(text, 'cacheHitRate'))
   assert.ok(hasText(text, 'calls'))
+  assert.ok(hasText(text, 'estCost'))
   assert.ok(hasText(text, '5,500'), 'the full total should be shown')
   assert.ok(hasText(text, '90.0%'), 'the cache hit rate should be shown')
   assert.ok(hasText(text, '55'))
@@ -437,6 +451,46 @@ test('a ready payload renders the three ranges, their metrics, today and the cal
   assert.ok(hasText(text, 'byModel'))
   assert.ok(hasText(text, 'deepseek-official/deepseek-v4-flash'))
   assert.ok(hasText(text, 'updatedAt'))
+})
+
+test('the overview shows what a period cost, in the bill’s own currency', () => {
+  const { module } = loadWithSection()
+  const { tree, text } = render(module, { status: 'ready', data: payload(), error: null })
+
+  // The estimate sits with the other metrics, after the hit rate, and it is money:
+  // two decimals and the currency the host priced in.
+  // `tl-metric` also prefixes the value, label and sub elements, so the metric
+  // itself is the one whose class is exactly that.
+  const metrics = findAllByClass(tree, 'tl-metric').filter((element) => element.props.className === 'tl-metric')
+  const labels = metrics.map((metric) => collectText(metric).join('|'))
+  const costMetric = labels.find((label) => label.includes('estCost'))
+  assert.ok(costMetric !== undefined, 'the estimate is one of the metrics')
+  assert.ok(costMetric.includes('¥123.46'), `two decimals of the month: ${costMetric}`)
+  assert.ok(costMetric.includes('CNY'), 'and the currency it is in')
+  assert.ok(labels.indexOf(costMetric) > labels.findIndex((label) => label.includes('cacheHitRate')), 'it comes after the hit rate')
+
+  // Today has its own number, not the month's.
+  const todayBlock = findAllByClass(tree, 'tl-card').find((card) => collectText(card).some((value) => value.startsWith('today')))
+  assert.ok(hasText(collectText(todayBlock), '¥1.50'), 'today is priced for today')
+
+  // Switching the range switches the estimate with it.
+  const year = render(module, { status: 'ready', data: payload(), error: null }, { range: 'year' })
+  assert.ok(hasText(year.text, '¥223.46'))
+
+  // A host with no prices says so rather than showing a confident zero.
+  const unpriced = render(module, { status: 'ready', data: payload({ cost: { priced: false, currency: null, rate: null, byRange: null } }), error: null })
+  assert.ok(hasText(unpriced.text, 'estCostNone'))
+  assert.ok(hasText(unpriced.text, '—'))
+  const silent = render(module, { status: 'ready', data: payload({ cost: undefined }), error: null })
+  assert.ok(hasText(silent.text, 'estCostNone'), 'and an older host without a cost at all is the same case')
+
+  // Tokens the bill could not price are named under the number they are missing from.
+  const partial = render(
+    module,
+    { status: 'ready', data: payload({ cost: { ...payload().cost, byRange: { ...payload().cost.byRange, month: { cost: 10, usageCost: 10, subscriptionCost: 0, unpricedTokens: 5_000_000, unpricedCost: true } } } }), error: null },
+  )
+  assert.ok(hasText(partial.text, 'estCostUnpriced'))
+  assert.ok(hasText(partial.text, '500.00 万'))
 })
 
 test('the week view renders one horizontal bar per day and drops the heat legend', () => {
@@ -1422,13 +1476,20 @@ test('prices and the bill are fetched only when their view is opened', () => {
     assert.equal(typeof rates.dispose, 'function')
     rates.dispose()
 
-    // The bill tab reads its own route, with the grouping and the period it is
-    // showing, so a file exported from the page is the page.
+    // The bill tab reads one request per section, each naming its own grouping and
+    // period, so a section that fails leaves the other three readable.
     calls.length = 0
     intervals = 0
     const bill = runEffect('bill', { status: 'loading', data: null, error: null }, 2)
-    assert.deepEqual(calls.map((call) => call.url), ['/api/token-ledger/bill?by=vendor&range=month'])
+    assert.deepEqual(calls.map((call) => call.url), [
+      '/api/token-ledger/bill?by=workspace&range=month',
+      '/api/token-ledger/bill?by=session&range=month',
+      '/api/token-ledger/bill?by=model&range=month',
+      '/api/token-ledger/bill?by=vendor&range=month',
+    ])
+    assert.equal(calls[0].options.cache, 'no-store')
     assert.equal(intervals, 1, 'the bill polls too, because the host keeps folding')
+    assert.equal(typeof bill.dispose, 'function')
     bill.dispose()
   } finally {
     globalThis.fetch = realFetch
@@ -1438,6 +1499,9 @@ test('prices and the bill are fetched only when their view is opened', () => {
 
 /* ------------------------------------------------------------------- bill -- */
 
+/** The groupings the page stacks, in order. */
+const BILL_DIMS = ['workspace', 'session', 'model', 'vendor']
+
 /**
  * A bill payload in the shape the route serves.
  *
@@ -1445,78 +1509,96 @@ test('prices and the bill are fetched only when their view is opened', () => {
  * priced and a join made by name, because those are the four things the view has
  * to say something about beyond the numbers.
  *
- * @param {object} [overrides] - fields to replace.
+ * @param {object} [overrides] - fields to replace, applied to the first section.
  * @returns {object} the payload.
  */
 function billPayload(overrides = {}) {
+  const rows = [
+    {
+      key: 'openai',
+      label: 'openai',
+      sublabel: null,
+      plan: true,
+      covered: true,
+      calls: 12,
+      inputTokens: 1_000_000,
+      outputTokens: 200_000,
+      cacheReadTokens: 500_000,
+      cacheWriteTokens: 0,
+      totalTokens: 1_700_000,
+      cacheHitRate: 0.3333,
+      cost: 140,
+      usageCost: 98.6,
+      unpricedTokens: 0,
+      modelCount: 2,
+      sessionCount: 3,
+      months: ['2026-03'],
+    },
+    {
+      key: 'usage',
+      label: null,
+      sublabel: null,
+      plan: false,
+      covered: false,
+      calls: 4,
+      inputTokens: 400_000,
+      outputTokens: 40_000,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 440_000,
+      cacheHitRate: 0,
+      cost: 4.2,
+      usageCost: 4.2,
+      unpricedTokens: 300_000,
+      modelCount: 3,
+      sessionCount: 2,
+    },
+  ]
+  const totals = {
+    calls: 16,
+    inputTokens: 1_400_000,
+    outputTokens: 240_000,
+    cacheReadTokens: 500_000,
+    cacheWriteTokens: 0,
+    totalTokens: 2_140_000,
+    cacheHitRate: 0.2632,
+    cost: 144.2,
+    usageCost: 102.8,
+    subscriptionCost: 140,
+    totalCost: 144.2,
+    unpricedCost: true,
+  }
+  const { sections: _ignored, ...rest } = overrides
   return {
     plugin: 'token-ledger',
     generatedAt: new Date(2026, 2, 31, 12, 0, 0).getTime(),
-    by: 'vendor',
-    range: { kind: 'month', from: '2026-03-01', to: '2026-03-31' },
+    dimensions: BILL_DIMS,
+    ranges: ['month'],
     currency: 'CNY',
     priceSource: 'modelsdev',
     fxRate: 7.1234,
-    rows: [
-      {
-        key: 'openai',
-        label: 'openai',
-        sublabel: null,
-        plan: true,
-        covered: true,
-        calls: 12,
-        inputTokens: 1_000_000,
-        outputTokens: 200_000,
-        cacheReadTokens: 500_000,
-        cacheWriteTokens: 0,
-        totalTokens: 1_700_000,
-        cacheHitRate: 0.3333,
-        cost: 140,
-        usageCost: 98.6,
-        unpricedTokens: 0,
-        modelCount: 2,
-        sessionCount: 3,
-        months: ['2026-03'],
-      },
-      {
-        key: 'usage',
-        label: null,
-        sublabel: null,
-        plan: false,
-        covered: false,
-        calls: 4,
-        inputTokens: 400_000,
-        outputTokens: 40_000,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        totalTokens: 440_000,
-        cacheHitRate: 0,
-        cost: 4.2,
-        usageCost: 4.2,
-        unpricedTokens: 300_000,
-        modelCount: 3,
-        sessionCount: 2,
-      },
-    ],
-    totals: {
-      calls: 16,
-      inputTokens: 1_400_000,
-      outputTokens: 240_000,
-      cacheReadTokens: 500_000,
-      cacheWriteTokens: 0,
-      totalTokens: 2_140_000,
-      cacheHitRate: 0.2632,
-      cost: 144.2,
-      usageCost: 102.8,
-      subscriptionCost: 140,
-      totalCost: 144.2,
-      unpricedCost: true,
-    },
+    sections: [{ by: 'workspace', range: { kind: 'month', from: '2026-03-01', to: '2026-03-31' }, rows, totals, currency: 'CNY' }],
     subscriptions: [{ plan: 'GPT plan', vendor: 'openai', amount: 140, currency: 'CNY', share: 140, months: ['2026-03'], note: null, calls: 12, totalTokens: 1_700_000, cacheHitRate: 0.3333 }],
     unpriced: [{ model: 'nobody/mystery-1', vendor: 'nobody', tokens: 300_000, calls: 2, reason: 'no price for this model' }],
     joins: [{ model: 'deepseek-official/deepseek-v4-flash', vendor: 'deepseek', price: 'DeepSeek-V4.1-Flash', priceId: 'deepseek-flash', confidence: 'name', matchedOn: 'name+version', tokens: 440_000 }],
-    ...overrides,
+    ...rest,
+    // A test that wants a different set of sections says so; the default above is
+    // one section with the two rows the other tests read.
+    ...(overrides.sections === undefined ? {} : { sections: overrides.sections }),
   }
+}
+
+/**
+ * A fetch state per grouping, all ready on the same payload.
+ *
+ * @param {object} [data] - the payload every section answers with.
+ * @param {object} [states] - per-grouping overrides.
+ * @returns {object} the `bills` prop.
+ */
+function billStates(data = billPayload(), states = {}) {
+  return Object.fromEntries(
+    BILL_DIMS.map((dim) => [dim, states[dim] ?? { status: 'ready', data, error: null }]),
+  )
 }
 
 /**
@@ -1526,117 +1608,166 @@ function billPayload(overrides = {}) {
  * which is what lets a test click a tab the way a reader would.
  *
  * @param {object} module - the loaded client module.
- * @param {object} state - the bill fetch state.
- * @param {{ by?: string, range?: string, onBy?: Function, onRange?: Function }} [hooks] - the current selections and their setters.
+ * @param {object} bills - the per-grouping fetch states.
+ * @param {{ ranges?: object, onRange?: Function }} [hooks] - the current periods and their setter.
  * @returns {unknown} the expanded tree.
  */
-function renderBillView(module, state, hooks = {}) {
+function renderBillView(module, bills, hooks = {}) {
   return expand(
     module.exports.BillView({
       t: fakeT(),
-      state,
-      by: hooks.by ?? 'vendor',
-      range: hooks.range ?? 'month',
-      onBy: hooks.onBy ?? (() => {}),
+      bills,
+      ranges: hooks.ranges ?? Object.fromEntries(BILL_DIMS.map((dim) => [dim, 'month'])),
       onRange: hooks.onRange ?? (() => {}),
     }),
   )
 }
 
-test('the bill view offers every grouping, every period and both exports', () => {
+/**
+ * The section cards, in page order.
+ *
+ * `findAllByClass` matches a class fragment, and `tl-card-title` contains
+ * `tl-card`, so the exact class is what identifies a card.
+ *
+ * @param {unknown} tree - the expanded tree.
+ * @returns {object[]} the cards.
+ */
+function cardsOf(tree) {
+  return findAllByClass(tree, 'tl-card').filter((element) => element.props.className === 'tl-card')
+}
+
+test('the bill stacks every grouping, each with every period', () => {
   const { module } = loadWithSection()
-  const tree = renderBillView(module, { status: 'ready', data: billPayload(), error: null }, { by: 'subscription', range: 'year' })
+  const tree = renderBillView(module, billStates())
   const text = collectText(tree)
-  for (const key of ['billByVendor', 'billBySubscription', 'billByWorkspace', 'billBySession', 'billByModel', 'rangeMonth', 'rangeYear', 'rangeWeek', 'rangeAll', 'billExportCsv', 'billExportJson']) {
+  for (const key of ['billByWorkspace', 'billBySession', 'billByModel', 'billByVendor', 'rangeMonth', 'rangeYear', 'rangeWeek', 'rangeToday', 'rangeAll', 'billExportAllCsv', 'billExportAllJson']) {
     assert.ok(hasText(text, key), key)
   }
 
-  // The export reads the route the page is showing, with the grouping and the
-  // period in the URL, so the file cannot disagree with the table.
+  // Four cards, one per grouping, each with its own five periods — the grouping is
+  // not a tab, and neither is the period.
+  assert.equal(cardsOf(tree).length, 4)
+  assert.equal(findAllByClass(tree, 'tl-bill-table').length, 4)
+  const tabs = findAllByClass(tree, 'tl-tab').filter((tab) => tab.type === 'button')
+  assert.equal(tabs.length, 20, 'five periods in each of four sections')
+  assert.equal(tabs.filter((tab) => tab.props['data-active'] === 'true').length, 4, 'one period is active per section')
+})
+
+test('the export at the top carries every grouping over every period', () => {
+  const { module } = loadWithSection()
+  const tree = renderBillView(module, billStates())
   const exports = findAllByClass(tree, 'tl-btn')
   assert.equal(exports.length, 2)
   assert.deepEqual(
     exports.map((link) => link.props.href),
-    ['/api/token-ledger/bill?by=subscription&range=year&format=csv', '/api/token-ledger/bill?by=subscription&range=year&format=json'],
+    [
+      '/api/token-ledger/bill?by=workspace,session,model,vendor&range=month,year,week,today,all&format=csv',
+      '/api/token-ledger/bill?by=workspace,session,model,vendor&range=month,year,week,today,all&format=json',
+    ],
   )
-  assert.equal(exports[0].props.download, 'token-bill-subscription-2026-03-31.csv')
-  assert.equal(exports[1].props.download, 'token-bill-subscription-2026-03-31.json')
+  assert.equal(exports[0].props.download, 'token-bill-all-2026-03-31.csv')
+  assert.equal(exports[1].props.download, 'token-bill-all-2026-03-31.json')
+  assert.ok(hasText(collectText(tree), 'billExportHint'), 'and the page says what the file contains')
 })
 
-test('the bill table shows a row per group, the tokens, the hit rate and the cost', () => {
+test('the bill table shows a row per group, both halves of the input and the cost', () => {
   const { module } = loadWithSection()
-  const tree = renderBillView(module, { status: 'ready', data: billPayload(), error: null })
-  const rows = findAllByClass(tree, 'tl-bill-row')
+  const tree = renderBillView(module, billStates())
+  const section = cardsOf(tree)[0]
+  const rows = findAllByClass(section, 'tl-bill-row')
   assert.equal(rows.length, 2, 'the plan and the pay-as-you-go line')
-  assert.ok(collectText(rows[0]).includes('openai'))
   assert.ok(collectText(rows[1]).includes('billPayAsYouGo'), 'the unnamed line is labelled by the view')
-  assert.equal(findAllByClass(tree, 'tl-bill-total').length, 1)
-  assert.ok(hasText(collectText(findAllByClass(tree, 'tl-bill-total')[0]), '¥144.20'), 'the total is the bill, not the usage alone')
 
-  // The plan row is badged as a plan, and its cost is the plan while the usage it
-  // covers is one hover away.
-  const badges = findAllByClass(rows[0], 'tl-badge')
-  assert.equal(badges.length, 1)
-  const costCell = [rows[0].children].flat(Infinity).at(-1)
-  assert.ok(hasText(collectText(costCell), '¥140.00'))
-  assert.ok(hasText(collectText(costCell), 'billCoveredUsage ¥98.60'), 'the usage the plan covers is stated beside the plan, not added to it')
+  // The header names the two halves of the input, in the order a bill is read:
+  // what the cache served, then what had to be sent.
+  const head = collectText(findAllByClass(section, 'tl-bill-head')[0])
+  assert.deepEqual(head, ['billByWorkspace', 'calls', 'cacheReadTokens', 'inputTokens', 'outputTokens', 'cacheHitRate', 'billCost'])
+
+  const cells = rows[1].children
+  assert.equal(collectText(cells[1])[0], '4', 'calls')
+  assert.equal(collectText(cells[2])[0], '0', 'cache-hit input')
+  assert.equal(collectText(cells[3])[0], '40.00 万', 'uncached input')
+  assert.equal(collectText(cells[4])[0], '4.00 万', 'output')
+  assert.equal(collectText(cells[5])[0], '0.0%', 'hit rate')
+  assert.ok(hasText(collectText(cells[6]), '¥4.20'), 'cost')
+
+  // The plan row states the plan beside the usage it covers, not added to it.
+  const planCells = rows[0].children
+  assert.ok(hasText(collectText(planCells[6]), '¥140.00'))
+  assert.ok(hasText(collectText(planCells[6]), 'billCoveredUsage ¥98.60'))
+
+  const total = findAllByClass(section, 'tl-bill-total')[0]
+  assert.ok(hasText(collectText(total), '¥144.20'), 'the total is the bill, not the usage alone')
 })
 
 test('the bill states what it could not price and how it joined the rest', () => {
   const { module } = loadWithSection()
-  const text = collectText(renderBillView(module, { status: 'ready', data: billPayload(), error: null }))
+  const text = collectText(renderBillView(module, billStates()))
   assert.ok(hasText(text, 'billUnpriced'))
   assert.ok(hasText(text, 'nobody/mystery-1 — '))
   assert.ok(hasText(text, 'no price for this model'))
   assert.ok(hasText(text, 'billJoins'), 'a price applied by name is shown, not hidden')
   assert.ok(hasText(text, 'deepseek-official/deepseek-v4-flash → deepseek/deepseek-flash (name+version)'))
   assert.ok(hasText(text, 'billEstimate'))
-  assert.ok(hasText(text, 'GPT plan'), 'the plan and what it covered are restated below the table')
+  assert.ok(hasText(text, 'GPT plan'), 'the plan and what it covered are restated below the tables')
   assert.ok(hasText(text, 'unpricedBadge'), 'and the row with unpriced tokens is marked')
 })
 
-test('choosing a grouping or a period asks the section to bill that instead', () => {
+test('each section can be put on its own period', () => {
   const { module } = loadWithSection()
   const asked = []
-  const tree = renderBillView(module, { status: 'ready', data: billPayload(), error: null }, {
-    onBy: (value) => asked.push(['by', value]),
-    onRange: (value) => asked.push(['range', value]),
-  })
-  // `tl-tab` also prefixes the `tl-tabs` container, so the buttons are the tabs.
-  const tabs = findAllByClass(tree, 'tl-tab').filter((tab) => tab.type === 'button')
-  const bySubscription = tabs.find((tab) => collectText(tab).includes('billBySubscription'))
-  const byYear = tabs.find((tab) => collectText(tab).includes('rangeYear'))
-  assert.equal(bySubscription.props['data-active'], 'false')
-  assert.equal(tabs.find((tab) => collectText(tab).includes('billByVendor')).props['data-active'], 'true')
-  bySubscription.props.onClick()
-  byYear.props.onClick()
-  assert.deepEqual(asked, [['by', 'subscription'], ['range', 'year']])
+  const ranges = { workspace: 'month', session: 'today', model: 'all', vendor: 'year' }
+  const tree = renderBillView(module, billStates(), { ranges, onRange: (dim, value) => asked.push([dim, value]) })
+  const cards = cardsOf(tree)
+  assert.equal(cards.length, 4)
+
+  // The section that is showing today has today's tab active, and only its own.
+  const sessionTabs = findAllByClass(cards[1], 'tl-tab').filter((tab) => tab.type === 'button')
+  const active = sessionTabs.filter((tab) => tab.props['data-active'] === 'true')
+  assert.equal(active.length, 1)
+  assert.ok(hasText(collectText(active[0]), 'rangeToday'))
+
+  // Clicking a period reports which section it belongs to.
+  const yearTab = findAllByClass(cards[3], 'tl-tab')
+    .filter((tab) => tab.type === 'button')
+    .find((tab) => hasText(collectText(tab), 'rangeYear'))
+  yearTab.props.onClick()
+  assert.deepEqual(asked, [['vendor', 'year']])
 })
 
-test('an empty bill says so, and a missing one explains itself', () => {
+test('one section failing leaves the other three readable', () => {
   const { module } = loadWithSection()
-  const empty = renderBillView(module, { status: 'ready', data: billPayload({ rows: [], totals: { calls: 0, totalTokens: 0, cost: 0, totalCost: 0, cacheHitRate: null }, subscriptions: [], unpriced: [], joins: [] }), error: null })
-  assert.ok(hasText(collectText(empty), 'billEmpty'))
-  assert.equal(findAllByClass(empty, 'tl-bill-row').length, 0)
-  assert.equal(findAllByClass(empty, 'tl-bill-total').length, 0, 'no table for no rows')
+  const tree = renderBillView(
+    module,
+    billStates(billPayload(), {
+      session: { status: 'error', data: null, error: 'HTTP 500' },
+      model: { status: 'stale', data: billPayload(), error: 'network' },
+    }),
+  )
+  const cards = cardsOf(tree)
+  assert.equal(findAllByClass(cards[1], 'tl-bill-table').length, 0, 'the failed section has no table')
+  assert.ok(hasText(collectText(cards[1]), 'billSectionFailed'))
+  assert.ok(hasText(collectText(cards[1]), 'HTTP 500'))
+  assert.equal(findAllByClass(cards[2], 'tl-bill-table').length, 1, 'a stale section keeps its last good numbers')
+  assert.equal(findAllByClass(cards[0], 'tl-bill-table').length, 1, 'the others are untouched')
+  assert.ok(hasText(collectText(tree), 'stale'))
+})
 
-  const failed = renderBillView(module, { status: 'error', data: null, error: 'HTTP 500' })
-  const text = collectText(failed)
-  assert.ok(hasText(text, 'unavailable'))
-  assert.ok(hasText(text, 'billUnavailableReason'))
-  assert.ok(hasText(text, 'HTTP 500'))
-
-  // A stale bill keeps the last good numbers rather than blanking the page.
-  const stale = renderBillView(module, { status: 'stale', data: billPayload(), error: 'network' })
-  assert.ok(hasText(collectText(stale), 'stale'))
-  assert.equal(findAllByClass(stale, 'tl-bill-row').length, 2)
+test('an empty bill says so inside its own card', () => {
+  const { module } = loadWithSection()
+  const empty = billPayload({ sections: [{ by: 'workspace', range: { kind: 'month', from: '2026-03-01', to: '2026-03-31' }, rows: [], totals: { calls: 0, totalTokens: 0, totalCost: 0, cacheHitRate: null } }] })
+  const tree = renderBillView(module, billStates(empty))
+  assert.ok(hasText(collectText(tree), 'billSectionEmpty'))
+  assert.equal(findAllByClass(tree, 'tl-bill-row').length, 0)
+  assert.equal(findAllByClass(tree, 'tl-bill-total').length, 0, 'no table for no rows')
+  assert.equal(findAllByClass(tree, 'tl-bill-table').length, 0)
 })
 
 test('a bill payload missing every optional field still renders', () => {
   const { module } = loadWithSection()
-  const tree = renderBillView(module, { status: 'ready', data: { plugin: 'token-ledger' }, error: null })
+  const tree = renderBillView(module, billStates({ plugin: 'token-ledger' }))
   const text = collectText(tree)
-  assert.ok(hasText(text, 'billEmpty'), 'nothing to bill is said, not left blank')
-  assert.ok(hasText(text, 'billByVendor'), 'and the groupings are still offered')
-  assert.equal(findAllByClass(tree, 'tl-bill-total').length, 0)
+  assert.equal(cardsOf(tree).length, 4, 'the four sections are still offered')
+  assert.ok(hasText(text, 'billByWorkspace'))
+  assert.ok(hasText(text, 'billExportHint'))
 })

@@ -7,7 +7,7 @@ point of this file is to be checkable and to state its own gaps.
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-09-12 (0.5.0; the 0.4.0 runs below were on 2026-09-10) |
+| Date | 2026-09-12 (0.6.0 and 0.5.0; the 0.4.0 runs below were on 2026-09-10) |
 | OS | Windows (win32) |
 | Node.js | v24.18.0 |
 | DSH | 0.1.2-rc.1 (packaged desktop build) |
@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm run test:single-process` — **261 tests in 13 files, all passing**, with no
+`npm run test:single-process` — **271 tests in 13 files, all passing**, with no
 dependencies to install and no network. (That is the same suite as `npm test`;
 the per-file process isolation Node uses by default cannot `spawn` on this
 machine, so the isolation-free runner is the one used here.) The
@@ -25,18 +25,18 @@ reach the real one:
 
 | File | Tests | Covers |
 | --- | --- | --- |
-| `test/ledger.test.mjs` | 27 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, the peak/off-peak split and the usage cross table, workspace capture, and a property-style cross-check against an independent naive implementation over 25 generated logs |
+| `test/ledger.test.mjs` | 28 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, the peak/off-peak split and the usage cross table, workspace capture, the session title DSH gives a session (last one wins, blank and non-string titles ignored, survives a restart), and a property-style cross-check against an independent naive implementation over 25 generated logs |
 | `test/cli.test.mjs` | 13 | rebuild/audit/rebuild-write/export over synthetic homes, pending-vs-stale classification, tamper detection, exit codes, torn logs |
 | `test/plugin.test.mjs` | 20 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, `/tokens` variants, degraded services, config overrides, all three routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
 | `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
-| `test/bill.test.mjs` | 18 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by vendor/model/workspace/session, each range including "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers on every row that spans it, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, and the CSV |
-| `test/route.test.mjs` | 38 | all three routes: the loopback and origin guard, unsupported methods, the bill's grouping/range query with its fallbacks, the CSV download and its filename, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 paths |
+| `test/bill.test.mjs` | 22 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by vendor/model/workspace/session with a session labelled `workspace/title` and a model labelled `vendor/model`, each range including `today` and "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers, a plan allocated across rows so that every grouping's rows sum to its own total, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, and the CSV |
+| `test/route.test.mjs` | 40 | all three routes: the loopback and origin guard, unsupported methods, the bill's grouping and range lists with their fallbacks (one section per request, twenty for an export), the CSV download and its filename, the overview's per-period costs and its degradation when there are no prices, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 paths |
 | `test/rates.test.mjs` | 27 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, the adopt/keep decision, and the input validator |
 | `test/rates-service.test.mjs` | 13 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
-| `test/client.test.mjs` | 51 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, all three views' rendering logic, the bill's tabs and export links, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that each view reads its route only when it is opened |
+| `test/client.test.mjs` | 54 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, all three views' rendering logic, the overview's estimated cost per range and per day (including the no-prices dash), the bill's four stacked sections with a period each, its export links and its per-section failure, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that each view reads its route only when it is opened |
 | `test/vendor-prices.test.mjs` | 9 | the vendor pricing-page adapters: the HTML helpers, a price written as `0.15元` and as `输入：0.5元`, DeepSeek's merged label cells and both time-of-day columns, Z.ai's storage column that sometimes says "Limited-time Free", Tencent's label-embedded prices, and a row per period |
-| `test/client-render.test.mjs` | 20 | the same views under the real React, asserting the actual markup, the bill's export URLs and money columns, and that the library raises no complaint |
+| `test/client-render.test.mjs` | 20 | the same views under the real React, asserting the actual markup, the bill's four cards, twenty period tabs, export URLs and money columns, and that the library raises no complaint |
 | `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
 
 The React-dependent files skip with a stated reason when `react` and `react-dom`
@@ -686,6 +686,85 @@ loads is the one with the bill tab in it.
 The isolated host was stopped by port afterwards, and this machine's real DSH
 instance on its own port was confirmed still listening.
 
+## The stacked bill and the overview's cost, 0.6.0
+
+The same host was reused — isolated `DSH_HOME`, disposable `web` profile, one
+¥199 DeepSeek plan in the patch layer — with the ledger rebuilt to version 5 from
+this machine's 140 stored sessions (1,915,709,366 tokens, 8,783 calls, 58 sessions
+carrying the title DSH gave them).
+
+### Every grouping's rows add up to that grouping's total
+
+This is the property the plan allocation exists to have, checked against the live
+ledger rather than a fixture:
+
+```
+grouping   rows   sum(rows)   section total   plan allocated
+workspace  8      169.784     169.7840        79.6
+session    50     169.784     169.7840        79.6
+model      4      169.784     169.7840        79.6
+vendor     3      169.784     169.7840        79.6
+```
+
+The plan is 79.6 (¥199 over the 12 days of September the bill covers) and it is
+allocated across the rows in proportion to the usage it covers — the vendor
+section carries it in full on the one DeepSeek row, the workspace section spreads
+it over the workspaces that used DeepSeek:
+
+```
+vendor / month            cost     usageCost   planCost
+  deepseek                79.60    96.45       79.60
+  qwen                    63.98    63.98       0
+  z-ai                    26.20    26.20       0
+
+workspace / month         cost     planCost    usageCost
+  E:\bosc_project\DB_ontology   71.47   42.29   80.43
+  D:\LLM\knowledge-base         40.85    5.84   42.09
+  E:\bosc_project\dsh行内部署    22.64    8.30   24.40
+```
+
+### The labels are DSH's own names
+
+A session row is `workspace/title` with the DSH session title, and a model row is
+`vendor/model`:
+
+```
+dsh行内部署/@2026-09-02-AI工作复盘.md 这是我   · session-61bd1519-… · E:\bosc_project\dsh行内部署
+DB_ontology/# 任务书：把样例数据建成 Onto…    · session-d818967e-… · E:\bosc_project\DB_ontology
+deepseek/DeepSeek-V4.1-Flash                  cost 79.60
+qwen/Qwen3.8 Flash                            cost 59.31
+```
+
+### The export
+
+`?by=workspace,session,model,vendor&range=month,year,week,today,all&format=csv`
+answered 200, `text/csv`, **36,007 bytes**, `attachment; filename="token-bill-all-2026-09-12.csv"`,
+with 325 lines: a header, one row and one total for each of the 20 sections, and
+no grand total across the overlapping periods. The single-section export
+(`?by=vendor&range=today`) is named for what it holds —
+`token-bill-vendor-today-2026-09-12.csv` — and its total matched the JSON
+`totals.totalCost` for the same section.
+
+### The overview's estimate
+
+```
+GET /api/token-ledger/summary
+  cost.priced: true, currency: CNY, rate: 6.725314
+  today  cost   6.63   (usage 13.99, plan 6.63)
+  week   cost 107.52   (usage 101.96, plan 46.43)
+  month  cost 169.78   (usage 186.64, plan 79.60)
+  year   cost 197.14   (usage 566.30, plan 79.60)
+```
+
+The month's 169.78 is the same number the bill's month section reports, which is
+the point of pricing the overview with the bill's own arithmetic rather than a
+second estimator. The overview's `today` is priced by the same code path as the
+bill's `today` range.
+
+The browser half served by that host was read back too: the 3.87 MB bundle
+contains `BillSection`, `BILL_SECTION_ORDER`, `rangeToday`, `billExportAllCsv`,
+`billPlanShare` and `estCost`.
+
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not
@@ -705,7 +784,17 @@ useful:
   the **Rates** or **Bill** tab on screen. The 0.3.0 round of feedback came from
   looking at the page; the rates and bill work has not had that pass. The bill's
   CSV download in particular is asserted from the response headers and body, not
-  by clicking the button in a browser.
+  by clicking the button in a browser, and the four stacked sections have not been
+  looked at in a panel narrow enough to need their horizontal scroll.
+- **What a long session title looks like.** DSH's own titles are sometimes a
+  truncated first prompt and sometimes a generated name; the page truncates with an
+  ellipsis and keeps the full title in the tooltip, which is a CSS claim rather than
+  an observed one.
+- **The plan allocation's fairness.** A plan is allocated across rows in proportion
+  to the usage cost it covers, which is what makes the rows sum to the total — but
+  the ledger does not know a provider's actual plan terms (quotas, per-model
+  exclusions), so the allocation is a stated convention, not the provider's own
+  accounting.
 - **The vendor marks as pixels.** Twelve bundled marks are checked structurally:
   each is diffed against the vendor's original file — same element sequence, same
   path geometry, same transforms, fill-rules, clip paths and classes — so a dropped

@@ -30,12 +30,12 @@ scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
 If you only want a pretty chart, there are a dozen plugins for that. This one is
 for when you need to *defend* the number.
 
-Since 0.5 the settings page has three tabs: **Overview** (the ledger), **Rates** (a
-price list for each vendor's newest models, with the live USD/CNY rate) and
-**Bill** (the same usage turned into money — by vendor, workspace, session, model
-or plan, exportable as CSV or JSON). The bill names the price source, the rate and
-every price it could not apply, so the number can be checked; the overview still
-counts tokens and stops there. See [Settings page](#settings-page).
+Since 0.6 the settings page has three tabs: **Overview** (the ledger, with what each
+period cost), **Rates** (a price list for each vendor's newest models, with the live
+USD/CNY rate) and **Bill** (the same usage turned into money — four groupings stacked
+over five periods each, exportable as CSV or JSON in one file). The bill names the
+price source, the rate and every price it could not apply, so the number can be
+checked. See [Settings page](#settings-page).
 
 ## Why it installs where others do not
 
@@ -159,10 +159,18 @@ three tabs: **Overview**, **Rates** and **Bill**.
 ### Overview
 
 - **Range totals** for this month, this year and the last 7 days — total tokens,
-  cache hit rate, call count, and the bucket breakdown behind them. The cache hit
-  rate is `cacheRead / (cacheRead + uncachedInput)`: the share of input the prompt
-  cache absorbed, so a route with no caching reads 0% rather than undefined.
-- **Today, live** — today's tokens, hit rate and calls, refreshed once a minute.
+  cache hit rate, call count, **预计花费 (estimated cost)** and the bucket breakdown
+  behind them. The cache hit rate is `cacheRead / (cacheRead + uncachedInput)`: the
+  share of input the prompt cache absorbed, so a route with no caching reads 0%
+  rather than undefined.
+- **The estimated cost is the bill's own arithmetic**, computed on the host for each
+  of the overview's periods, so the number under *this month* and the bill's month
+  are the same number rather than two estimators that agree today. It is shown in
+  yuan to two decimals, with the rate it converted at. A host that has no prices yet
+  shows a dash and says why instead of a confident `¥0.00`, and tokens the bill could
+  not price are named underneath the number they are missing from.
+- **Today, live** — today's tokens, hit rate, calls and cost, refreshed once a
+  minute.
 - **A usage calendar** switchable between year, month and week. Year and month are
   heatmaps; the week view is one horizontal bar per day. Heat levels are relative
   to the busiest day in the window and square-rooted, so one huge day cannot
@@ -233,24 +241,38 @@ three tabs: **Overview**, **Rates** and **Bill**.
 
 ### Bill
 
-The same usage, grouped the way a bill is read, with a cost for each group.
+The same usage, grouped the way a bill is read. **Four groupings are stacked** —
+workspace, session, model, vendor — rather than put behind a tab, because the
+question a bill answers is usually comparative, and **each section carries its own
+period**, so this month by workspace can sit above today by model.
 
-- **Five groupings**: by **vendor**, by **workspace**, by **session**, by **model**,
-  or by **plan**. A workspace row is the `cwd` the ledger recorded for the sessions
-  that ran there — a directory that was actually worked in, not a label. Every row
-  carries the call count, input, output, the cache hit rate and what it costs.
-- **Four periods**: this week, this month, this year or everything, using the same
-  trailing-window definitions as the overview.
+- **What each row shows**: the group, the call count, **cache-read input**
+  (缓存命中输入), **input that missed the cache** (未命中输入), output, the cache hit
+  rate and **the cost** (实际花费). The two input columns are separate because they
+  are priced differently on every vendor that prices them at all. Cache-write input
+  is stated under each table rather than as a column that would be a dash nearly
+  everywhere.
+- **Names that mean something**: a workspace row is the `cwd` the ledger recorded for
+  the sessions that ran there; a session row reads `workspace/session-name`, using the
+  title DSH itself gave the session (falling back to the session id for sessions DSH
+  never titled, with the full id and path in the tooltip); a model row reads
+  `vendor/model`, so it says whose price was applied.
+- **Five periods per section**: this month, this year, the last 7 days, today, or
+  everything, using the same trailing-window definitions as the overview.
+- **One export for all of it, top right.** CSV or JSON, carrying every grouping over
+  every period, with the currency on every row and **one `TOTAL` per section**. There
+  is deliberately no grand total: the periods overlap, and adding today to this week
+  to this month would count the same tokens four times.
 - **By plan, without double counting.** `subscriptions` in the config takes monthly
   plans, and the fee is spread over the days the bill covers: the 1st-to-10th of a
-  ¥199 month is ¥66.33, not ¥199. A vendor on a plan is billed its plan and the
-  usage it covers is shown beside it rather than added to it — the reason the two
-  numbers are separate is that adding them would charge for the same calls twice. A
-  plan whose vendor has no usage in the period is still billed, because it was still
-  paid for.
-- **A CSV or JSON export, top right.** Both read the same route with the grouping
-  and period on screen, so the file is the page rather than a second implementation
-  of the arithmetic. The CSV carries the currency on every row and a `TOTAL` line.
+  ¥199 month is ¥66.33, not ¥199. A vendor on a plan is billed its plan and the usage
+  it covers is shown beside it rather than added to it, because adding them would
+  charge for the same calls twice. Because a plan is one charge, on a grouping where
+  its vendor appears in several rows — workspaces, sessions, models — the plan is
+  *allocated* across those rows in proportion to the usage it covers, which is what
+  makes a section's rows add up to its total. A row billed partly by plan says so
+  (`其中套餐摊分`), and a plan whose vendor has no usage in the period is still billed,
+  because it was still paid for.
 - **What it could not price is listed, not charged at zero**: each unpriced model
   with its tokens, calls and the reason — no price for that model, an ambiguous name
   that two vendors both publish, or a price in a currency the bill cannot convert.
@@ -266,10 +288,10 @@ The same usage, grouped the way a bill is read, with a cost for each group.
   partially delivered requests, and it does not know about a plan's included quota
   beyond what you tell it in the config.
 
-
+The page reads three loopback-only routes: `GET /api/token-ledger/summary` for the
 overview, `GET|POST /api/token-ledger/rates` for prices and the rate, and
 `GET /api/token-ledger/bill` for the bill. The overview polls once a minute, prices
-and the bill only while their tab is open. All three refuse a
+and the bill only while their view is open. All three refuse a
 non-loopback peer, so they stay private even if the web server is bound to
 `0.0.0.0`. The write half additionally requires a JSON content type — a
 cross-origin form cannot send one — and caps the body at 256 KiB.
@@ -279,9 +301,6 @@ It needs a profile with a web server (the `web` or `desktop` profile). Without o
 that hand-entered prices are entered **on that page**: there is no command-line
 equivalent yet, so a headless profile can read the usage ledger but cannot type a
 price.
-
-It needs a profile with a web server (the `web` or `desktop` profile). Without one,
-`/tokens` and the CLI still work, and the section says so instead of failing.
 
 None of the three views is published through a settings namespace. That would need a schema —
 a real dependency, and this package has none — and would rewrite `settings.yaml` on
@@ -324,12 +343,13 @@ wants; the rates page still works.
 
 ## What it deliberately does not do
 
-- **No cost on the overview, and a stated-basis estimate on the bill.** The
-  overview counts tokens and stops there. The bill does multiply tokens by prices,
-  because that is what a bill is; it names the price source, the rate it converted
-  at, every join it made by name and every model it could not price, so the number
-  can be checked rather than believed. It is not a provider invoice and does not
-  claim to be one — see the Bill section above for what it leaves out.
+- **The overview states an estimate with its basis; the bill itemizes it.** The
+  overview shows an estimated cost (yuan, two decimals) in its range totals and in
+  today, computed by the bill's own arithmetic; the bill shows every grouping and
+  every period row by row. Both name the price source, the rate they converted at,
+  every price joined by name and every model that could not be priced, so the number
+  can be checked rather than believed. Neither is a provider invoice and neither
+  claims to be — see the Bill section above for what they leave out.
 - **No bundled price list.** Prices are fetched from a source you can choose — the
   default is each vendor's own list price — or typed by you. A price list shipped
   inside the package would be wrong within weeks and would have to be updated by a
