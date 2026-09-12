@@ -403,12 +403,12 @@ test('every vendor group renders a header and one row per model', { skip }, () =
   // A manual row is marked in the markup, not only in prose.
   assert.equal(countClass(html, 'tl-rate-row').valueOf(), 3)
   assert.equal((html.match(/data-manual="true"/g) ?? []).length, 2)
-  // Prices are shown in the quote currency, keeping their magnitude: a price over
-  // a yuan loses its pointless zeros, a hundredth of a cent does not round away,
-  // and an unpublished one is a dash.
+  // Prices are shown in the quote currency, one precision per column: a converted
+  // price keeps cents, a price cents would erase keeps the decimals it needs, and an
+  // unpublished one is a dash.
   assert.ok(html.includes('>¥534.25<'), 'a converted price')
   assert.ok(html.includes('>¥17.81<'))
-  assert.ok(html.includes('>¥0.001425<'))
+  assert.ok(html.includes('>¥0.0014<'))
   assert.ok(html.includes('>—<'))
   // The US dollar quote it came from is on the cell, not lost.
   assert.ok(html.includes('title="priceUsdHint $75"'), html.slice(html.indexOf('tl-rate-price'), html.indexOf('tl-rate-price') + 200))

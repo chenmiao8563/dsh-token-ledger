@@ -719,8 +719,11 @@ test('prices are converted into the quote currency, with the quote a hover away'
   // 2.5 / 75 / 0.15 / 0.0002 USD per million tokens at 7.1234.
   assert.ok(hasText(text, '¥17.81'))
   assert.ok(hasText(text, '¥534.25'))
-  assert.ok(hasText(text, '¥1.07'), 'a price under a yuan keeps three decimals')
-  assert.ok(hasText(text, '¥0.001425'), 'a hundredth of a cent is not rounded away')
+  assert.ok(hasText(text, '¥1.07'))
+  // A converted column is shown in cents, so a price that cents would erase keeps
+  // two significant digits instead of becoming `¥0.00`, and the column's other cells
+  // pad to that same width.
+  assert.ok(hasText(text, '¥0.0014'), 'a hundredth of a cent is not rounded away')
   assert.ok(!hasText(text, '$75'), 'the table does not mix currencies')
   // The served value is USD, so every converted cell keeps its original one
   // hover away: the page never shows a number it cannot trace.
@@ -916,6 +919,55 @@ test('a vendor priced from its own page says so, and a dataset vendor does not',
   assert.ok(!hasText(text, '¥14.25'), 'nothing was converted')
   // The dataset vendor is still converted with the rate in the box (7.1234 here).
   assert.ok(hasText(text, '¥5.34'), 'Gemini at 0.75 USD becomes 5.34 CNY')
+})
+
+test('one column has one precision, so 0.04 and 0.30 line up', () => {
+  // The reported problem: DeepSeek's cache-read column read 0.04 / 0.02 / 0.3 /
+  // 0.15, where the 0.3 broke the column's scale. A price list is read down a
+  // column, so the column's widest cell decides its precision and the rest pad.
+  const { module } = loadWithSection()
+  const deepseek = ratesPayload({
+    vendors: [
+      {
+        vendor: 'deepseek',
+        modelCount: 4,
+        source: 'vendor',
+        currency: 'CNY',
+        models: [
+          { id: 'deepseek/flash@peak', name: 'DeepSeek-V4.1-Flash', vendor: 'deepseek', created: null, contextLength: null, prices: { input: 2, output: 8, cacheRead: 0.04, cacheWrite: null }, period: 'peak', source: 'vendor' },
+          { id: 'deepseek/flash@offPeak', name: 'DeepSeek-V4.1-Flash', vendor: 'deepseek', created: null, contextLength: null, prices: { input: 1, output: 4, cacheRead: 0.02, cacheWrite: null }, period: 'offPeak', source: 'vendor' },
+          { id: 'deepseek/pro@peak', name: 'DeepSeek-V4-Pro-0813', vendor: 'deepseek', created: null, contextLength: null, prices: { input: 9, output: 27, cacheRead: 0.3, cacheWrite: null }, period: 'peak', source: 'vendor' },
+          { id: 'deepseek/pro@offPeak', name: 'DeepSeek-V4-Pro-0813', vendor: 'deepseek', created: null, contextLength: null, prices: { input: 4.5, output: 13.5, cacheRead: 0.15, cacheWrite: null }, period: 'offPeak', source: 'vendor' },
+        ],
+      },
+    ],
+  })
+  const { tree, text } = renderRates(module, { status: 'ready', data: deepseek, error: null })
+
+  // The cache-read column takes two decimals, because 0.04 and 0.02 need two.
+  for (const value of ['¥0.04', '¥0.02', '¥0.30', '¥0.15']) assert.ok(hasText(text, value), `missing ${value}`)
+  // The input column needs one decimal for 4.5, so the whole column takes one.
+  for (const value of ['¥2.0', '¥1.0', '¥9.0', '¥4.5']) assert.ok(hasText(text, value), `missing ${value}`)
+  // Output needs one as well, for 13.5.
+  for (const value of ['¥8.0', '¥4.0', '¥27.0', '¥13.5']) assert.ok(hasText(text, value), `missing ${value}`)
+
+  // Every row is written to the same width in a given column.
+  const rows = findAllByClass(tree, 'tl-rate-row')
+  assert.deepEqual(rows.map((row) => collectText(row.children[3])), [['¥0.04'], ['¥0.02'], ['¥0.30'], ['¥0.15']])
+  assert.deepEqual(rows.map((row) => collectText(row.children[1])), [['¥2.0'], ['¥1.0'], ['¥9.0'], ['¥4.5']])
+  // A column with no price at all stays a dash rather than becoming `¥0.00`.
+  // The cells are name, input, output, cache read, cache write, actions.
+  assert.deepEqual(rows.map((row) => collectText(row.children[4])), [['—'], ['—'], ['—'], ['—']])
+})
+
+test('a column’s padding does not follow the quote into the tooltip', () => {
+  // The tooltip answers "what did the vendor quote?", which is one number rather
+  // than a column, so it keeps the vendor's own precision.
+  const { module } = loadWithSection()
+  const { tree } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  const titles = findAllByClass(tree, 'tl-rate-price').map((cell) => cell.props.title)
+  assert.ok(titles.includes('priceUsdHint $75'), JSON.stringify(titles))
+  assert.ok(titles.includes('priceUsdHint $0.0002'), 'the vendor’s own number, not padded to the column')
 })
 
 test('the model-name column has a floor, and a table too wide for the pane scrolls', () => {

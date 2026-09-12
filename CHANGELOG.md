@@ -106,6 +106,16 @@ Four things only a person reading the rendered table could have asked for:
 
 ### Changed, once the prices were checked against the vendors
 
+- **One precision per column.** A price list is read down a column, so a column that
+  read `0.04 / 0.02 / 0.3 / 0.15` was showing four measurements where there is one
+  scale. The column now decides its own width and every cell pads to it: DeepSeek's
+  cache reads read `¥0.04 / ¥0.02 / ¥0.30 / ¥0.15` and its inputs
+  `¥2.0 / ¥1.0 / ¥9.0 / ¥4.5`. Trailing zeros are kept rather than trimmed, for
+  exactly this reason. Two rules feed it: a price the vendor published in the display
+  currency is shown as published, and a converted price is shown in cents — except
+  that a column containing a price cents would erase takes the decimals that price
+  needs to keep two significant digits, so `¥0.0014` does not become `¥0.00`. A
+  tooltip is one number rather than a column and keeps the vendor's own precision.
 - **Prices are read from the vendors' own pricing pages where that is possible.**
   Three of them are: DeepSeek, Z.ai and Tencent. Each vendor group now says which
   it is — a `官方 / vendor` badge means those numbers were read from that vendor's
