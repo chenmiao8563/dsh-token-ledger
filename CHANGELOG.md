@@ -41,9 +41,12 @@ section now has **概览 / Overview** and **费率 / Rates** tabs at the top.
   as their own group and the page says so.
 - **Hand-entered values win and survive.** A price or a rate typed by the user is
   stored beside the ledger, outranks every later fetch, and can be handed back to
-  the fetched value ("恢复自动 / Use fetched") or cleared per model. This is the
-  whole offline story: with `rates: false` a strictly offline host makes no
-  request at all and the page is a price list the user maintains themselves.
+  the fetched value ("恢复自动 / Use fetched") or cleared per model. Emptying every
+  price in a row is an undo rather than a claim that the model has no price, so it
+  removes the override and the fetched prices return; a field left blank on a row
+  that is being edited clears that one price. This is the whole offline story: with
+  `rates: false` a strictly offline host makes no request at all and the page is a
+  price list the user maintains themselves.
 - `lib/rates.js` (pure: payloads in, rows out) and `lib/rates-service.js` (the
   network, the cache file, the timer, and the merge of hand-entered values).
 - `GET|POST /api/token-ledger/rates`. The write half is restricted: a JSON

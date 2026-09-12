@@ -189,6 +189,31 @@ function hasText(texts, needle) {
 }
 
 /**
+ * Collect every element carrying a class fragment.
+ *
+ * @param {unknown} node - the expanded tree.
+ * @param {string} fragment - the class fragment.
+ * @returns {unknown[]} the matching elements, in tree order.
+ */
+function findAllByClass(node, fragment) {
+  if (node === null || node === undefined || typeof node !== 'object') return []
+  if (Array.isArray(node)) return node.flatMap((child) => findAllByClass(child, fragment))
+  const found = String(node.props?.className ?? '').includes(fragment) ? [node] : []
+  return found.concat(findAllByClass(node.children ?? [], fragment))
+}
+
+/**
+ * Find the buttons inside a subtree by their label.
+ *
+ * @param {unknown} node - the expanded tree.
+ * @param {string} label - the button's text.
+ * @returns {object[]} the buttons.
+ */
+function findButtons(node, label) {
+  return findAllByClass(node, 'tl-btn').filter((element) => collectText(element).includes(label))
+}
+
+/**
  * A stand-in translator: returns the key, so assertions read the key names.
  *
  * @returns {(key: string) => string} the translator.
@@ -803,6 +828,111 @@ test('a rates payload missing every optional field still renders', () => {
   assert.ok(hasText(text, 'fxTitle'))
   assert.ok(hasText(text, '—'))
   assert.ok(hasText(text, 'ratesEmpty'))
+})
+
+/**
+ * Render the rates view on its own, with its draft hooks primed.
+ *
+ * The view is rendered directly rather than through the section so a test can
+ * hand it a recorder and click what a user would click.
+ *
+ * @param {object} module - the loaded client module.
+ * @param {object} state - the rates state.
+ * @param {object[]} sent - a recorder for the patches the view sends.
+ * @param {{ filter?: unknown, fxDraft?: unknown, editing?: unknown, draft?: unknown }} [hooks] - primed drafts.
+ * @returns {unknown} the expanded tree.
+ */
+function renderRatesView(module, state, sent, hooks = {}) {
+  const priming = module.priming
+  priming.length = 0
+  priming.push(hooks.filter ?? DEFAULT, hooks.fxDraft ?? DEFAULT, hooks.editing ?? DEFAULT, hooks.draft ?? DEFAULT)
+  const tree = expand(module.exports.RatesView({ t: fakeT(), state, onPatch: (patch) => sent.push(patch) }))
+  priming.length = 0
+  return tree
+}
+
+/**
+ * The rendered row of a fixture model, found by the name it displays.
+ *
+ * @param {unknown} tree - the expanded tree.
+ * @param {string} name - the display name.
+ * @returns {object|undefined} the row.
+ */
+function findRow(tree, name) {
+  return findAllByClass(tree, 'tl-rate-row').find((element) => collectText(element).includes(name))
+}
+
+test('the row editor sends only what was typed, and a blank means unset', () => {
+  const { module } = loadWithSection()
+  const sent = []
+  const tree = renderRatesView(module, { status: 'ready', data: ratesPayload(), error: null }, sent, {
+    editing: { id: 'acme/flagship', input: '3', output: '', cacheRead: '0.2', cacheWrite: '', invalid: false },
+  })
+  const row = findRow(tree, 'Acme Flagship')
+  assert.ok(row !== undefined, 'the edited row is rendered')
+  const save = findButtons(row, 'save')
+  assert.equal(save.length, 1, 'an edited row offers one save button')
+  assert.equal(save[0].props.disabled, false)
+  save[0].props.onClick()
+  assert.deepEqual(sent, [{ models: { 'acme/flagship': { input: 3, output: null, cacheRead: 0.2, cacheWrite: null } } }])
+})
+
+test('empty every price and the row goes back to the fetched values', () => {
+  const { module } = loadWithSection()
+  const sent = []
+  const tree = renderRatesView(module, { status: 'ready', data: ratesPayload(), error: null }, sent, {
+    editing: { id: 'acme/flagship', input: '', output: '', cacheRead: '', cacheWrite: '', invalid: false },
+  })
+  findButtons(findRow(tree, 'Acme Flagship'), 'save')[0].props.onClick()
+  // Not a row of dashes: the override is removed, so the fetched prices return.
+  assert.deepEqual(sent, [{ models: { 'acme/flagship': null } }])
+})
+
+test('a price that is not a number is refused in place, without sending', () => {
+  const { module } = loadWithSection()
+  const sent = []
+  const tree = renderRatesView(module, { status: 'ready', data: ratesPayload(), error: null }, sent, {
+    editing: { id: 'acme/flagship', input: 'abc', output: '', cacheRead: '', cacheWrite: '', invalid: false },
+  })
+  findButtons(findRow(tree, 'Acme Flagship'), 'save')[0].props.onClick()
+  assert.deepEqual(sent, [], 'nothing is sent to the host')
+})
+
+test('the manual form needs a model id and at least one price', () => {
+  const { module } = loadWithSection()
+  const sent = []
+  const state = { status: 'ready', data: ratesPayload(), error: null }
+
+  const empty = renderRatesView(module, state, sent, { draft: { id: '', input: '', output: '', cacheRead: '', cacheWrite: '' } })
+  assert.equal(findButtons(findByClass(empty, 'tl-manual-form'), 'save')[0].props.disabled, true, 'an empty form cannot be submitted')
+
+  const idOnly = renderRatesView(module, state, sent, { draft: { id: 'my-vendor/my-model', input: '', output: '', cacheRead: '', cacheWrite: '' } })
+  assert.equal(findButtons(findByClass(idOnly, 'tl-manual-form'), 'save')[0].props.disabled, true, 'a row of dashes is not worth creating')
+
+  const ready = renderRatesView(module, state, sent, { draft: { id: 'my-vendor/my-model', input: '0.5', output: '', cacheRead: '', cacheWrite: '' } })
+  const readySave = findButtons(findByClass(ready, 'tl-manual-form'), 'save')[0]
+  assert.equal(readySave.props.disabled, false)
+  readySave.props.onClick()
+  assert.deepEqual(sent, [{ models: { 'my-vendor/my-model': { input: 0.5, output: null, cacheRead: null, cacheWrite: null } } }])
+})
+
+test('the rate box sends the typed rate, and refuses a blank one', () => {
+  const { module } = loadWithSection()
+  const sent = []
+  const state = { status: 'ready', data: ratesPayload(), error: null }
+
+  const editing = renderRatesView(module, state, sent, { fxDraft: '7.05' })
+  const editSave = findButtons(editing, 'save')[0]
+  assert.equal(editSave.props.disabled, false)
+  editSave.props.onClick()
+  assert.deepEqual(sent, [{ fx: { rate: 7.05 } }])
+
+  // A blank box is refused rather than sent as zero.
+  const blank = renderRatesView(module, state, sent, { fxDraft: '' })
+  const blankSave = findButtons(blank, 'save')[0]
+  assert.equal(blankSave.props.disabled, true, 'a blank rate cannot be saved')
+  blankSave.props.onClick()
+  assert.equal(sent.length, 1, 'nothing further was sent')
 })
 
 test('prices are fetched only when the rates view is opened', () => {

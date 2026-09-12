@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm test` — 168 tests in 11 files, no dependencies to install, no network. The
+`npm test` — 174 tests in 11 files, no dependencies to install, no network. The
 suite replaces `globalThis.fetch` for the duration of a mount, so the pricing
 refresh is exercised against a host with no route to the internet and no test can
 reach the real one:
@@ -30,7 +30,7 @@ reach the real one:
 | `test/route.test.mjs` | 24 | both routes: the loopback and origin guard, unsupported methods, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 path |
 | `test/rates.test.mjs` | 15 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection, variant and retired-model exclusion, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
 | `test/rates-service.test.mjs` | 9 | fetch, cache and schedule: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, and every transport fault is reported instead of thrown |
-| `test/client.test.mjs` | 28 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, and that prices are only fetched once the rates tab is open |
+| `test/client.test.mjs` | 33 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
 | `test/client-render.test.mjs` | 13 | the same views under the real React, asserting the actual markup and that the library raises no complaint |
 | `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
 
