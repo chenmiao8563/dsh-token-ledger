@@ -710,19 +710,94 @@ test('the rates view shows the live rate, its source and the per-million unit', 
   assert.ok(hasText(text, 'CNY'))
   assert.ok(hasText(text, 'open.er-api.com'), 'the source host is named')
   assert.ok(hasText(text, 'fxHint'), 'the page says it computes no cost')
-  assert.ok(hasText(text, 'perMillion'), 'prices are labelled per million tokens')
+  assert.ok(hasText(text, 'perMillionCny'), 'prices are labelled per million tokens, in the quote currency')
 })
 
-test('prices follow their magnitude instead of a fixed number of decimals', () => {
+test('prices are converted into the quote currency, with the quote a hover away', () => {
   const { module } = loadWithSection()
-  const { text } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
-  assert.ok(hasText(text, '$75'), 'a whole price loses its pointless zeros')
-  assert.ok(hasText(text, '$2.5'))
-  assert.ok(hasText(text, '$0.25'))
-  assert.ok(hasText(text, '$0.15'))
-  assert.ok(hasText(text, '$0.0002'), 'a hundredth of a cent is not rounded away')
+  const { tree, text } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  // 2.5 / 75 / 0.15 / 0.0002 USD per million tokens at 7.1234.
+  assert.ok(hasText(text, '¥17.81'))
+  assert.ok(hasText(text, '¥534.25'))
+  assert.ok(hasText(text, '¥1.07'), 'a price under a yuan keeps three decimals')
+  assert.ok(hasText(text, '¥0.001425'), 'a hundredth of a cent is not rounded away')
+  assert.ok(!hasText(text, '$75'), 'the table does not mix currencies')
+  // The served value is USD, so every converted cell keeps its original one
+  // hover away: the page never shows a number it cannot trace.
+  const titles = findAllByClass(tree, 'tl-rate-price')
+    .map((cell) => cell.props.title)
+    .filter((title) => typeof title === 'string')
+  assert.ok(titles.includes('priceUsdHint $75'), JSON.stringify(titles))
+  assert.ok(titles.includes('priceUsdHint $0.0002'))
   // An unpublished price is a dash, which is not the same claim as free.
   assert.ok(hasText(text, '—'))
+})
+
+test('with no rate the table falls back to USD and says why', () => {
+  const { module } = loadWithSection()
+  const noRate = ratesPayload({
+    fx: { available: false, rate: null, base: 'USD', quote: 'CNY', source: 'https://open.er-api.com/v6/latest/USD', fetchedAt: null, ageMs: null, overridden: false },
+  })
+  const { tree, text } = renderRates(module, { status: 'ready', data: noRate, error: null })
+  assert.ok(hasText(text, '$75'), 'an unconvertible price stays in the currency it was quoted in')
+  assert.ok(hasText(text, '$0.0002'))
+  assert.ok(!hasText(text, '¥534.25'))
+  assert.ok(hasText(text, 'noRateForPrices'))
+  assert.ok(hasText(text, 'perMillionUsd'), 'the unit label follows the currency actually shown')
+  // ...and no cell claims a conversion it never made.
+  const titles = findAllByClass(tree, 'tl-rate-price').map((cell) => cell.props.title)
+  assert.ok(titles.every((title) => title === undefined), JSON.stringify(titles))
+})
+
+test('every vendor gets a brand mark, curated or not', () => {
+  const { module } = loadWithSection()
+  const curated = ratesPayload({
+    vendors: [
+      {
+        vendor: 'deepseek',
+        modelCount: 18,
+        models: [
+          {
+            id: 'deepseek/deepseek-chat',
+            name: 'DeepSeek Chat',
+            vendor: 'deepseek',
+            created: 1,
+            contextLength: 128000,
+            prices: { input: 10, output: 50, cacheRead: null, cacheWrite: null },
+            source: 'fetched',
+          },
+        ],
+      },
+    ],
+  })
+  const { tree } = renderRates(module, { status: 'ready', data: curated, error: null })
+  const marks = findAllByClass(tree, 'tl-logo')
+  assert.equal(marks.length, 1)
+  assert.deepEqual(collectText(marks[0]), ['DS'], 'a curated vendor gets its monogram')
+  assert.equal(marks[0].props.style.background, '#4d6bfe', 'in its own brand colour')
+
+  // A vendor nobody curated still gets one, or the leading column looks broken;
+  // the hand-entered group is marked as what it is.
+  const { tree: mixed } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  const all = findAllByClass(mixed, 'tl-logo')
+  assert.equal(all.length, 2, 'one per vendor group')
+  assert.deepEqual(collectText(all[1]), ['··'], 'the hand-entered group carries no brand')
+  assert.match(all[0].props.style.background, /^#[0-9a-f]{6}$/)
+})
+
+test('the model-name column has a floor, and a table too wide for the pane scrolls', () => {
+  // The reported bug: with a fixed 470px of price and action columns, a narrow
+  // panel left the name column zero pixels wide and the table showed prices for a
+  // model nobody could identify. The fix is a floor on the name column plus a
+  // horizontally scrollable table, so both halves are pinned here.
+  const source = readFileSync(fileURLToPath(new URL('../lib/client.js', import.meta.url)), 'utf8')
+  assert.match(source, /\.tl-rate-head, \.tl-rate-row \{ display: grid; grid-template-columns: minmax\(\d+px, 1fr\)/)
+  assert.match(source, /\.tl-rate-table \{ min-width: \d+px/)
+
+  const { module } = loadWithSection()
+  const { tree } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  assert.equal(countByExactClass(tree, 'tl-rate-scroll'), 2, 'one scroll container per vendor group')
+  assert.equal(countByExactClass(tree, 'tl-rate-table'), 2, 'the header and its rows stay in one table')
 })
 
 test('each vendor group lists its models with a column per price', () => {
@@ -862,11 +937,13 @@ function findRow(tree, name) {
   return findAllByClass(tree, 'tl-rate-row').find((element) => collectText(element).includes(name))
 }
 
-test('the row editor sends only what was typed, and a blank means unset', () => {
+test('the row editor shows the quote currency and sends the stored one', () => {
   const { module } = loadWithSection()
   const sent = []
+  // The table shows ¥, so the editor is filled in ¥ and the host is handed USD:
+  // 71.234 ¥ and 1.06851 ¥ are exactly 10 and 0.15 USD at the fixture's rate.
   const tree = renderRatesView(module, { status: 'ready', data: ratesPayload(), error: null }, sent, {
-    editing: { id: 'acme/flagship', input: '3', output: '', cacheRead: '0.2', cacheWrite: '', invalid: false },
+    editing: { id: 'acme/flagship', input: '71.234', output: '', cacheRead: '1.06851', cacheWrite: '', invalid: false },
   })
   const row = findRow(tree, 'Acme Flagship')
   assert.ok(row !== undefined, 'the edited row is rendered')
@@ -874,7 +951,22 @@ test('the row editor sends only what was typed, and a blank means unset', () => 
   assert.equal(save.length, 1, 'an edited row offers one save button')
   assert.equal(save[0].props.disabled, false)
   save[0].props.onClick()
-  assert.deepEqual(sent, [{ models: { 'acme/flagship': { input: 3, output: null, cacheRead: 0.2, cacheWrite: null } } }])
+  assert.deepEqual(sent, [{ models: { 'acme/flagship': { input: 10, output: null, cacheRead: 0.15, cacheWrite: null } } }])
+})
+
+test('opening the editor fills it with the displayed currency, not the stored one', () => {
+  const { module } = loadWithSection()
+  const tree = renderRatesView(module, { status: 'ready', data: ratesPayload(), error: null }, [], {})
+  findButtons(findRow(tree, 'Acme Flagship'), 'edit')[0].props.onClick()
+  // Typing into the editor must not mean typing USD while the table shows ¥, so
+  // the draft is the converted value — and the stored one is 2.5 USD per million.
+  const draft = module.recorder.setState
+  assert.equal(draft.id, 'acme/flagship')
+  assert.equal(draft.input, '17.8085')
+  assert.equal(draft.output, '534.255')
+  assert.equal(draft.cacheRead, '1.06851')
+  assert.equal(draft.cacheWrite, '0.001425')
+  assert.equal(draft.invalid, false)
 })
 
 test('empty every price and the row goes back to the fetched values', () => {
@@ -909,10 +1001,11 @@ test('the manual form needs a model id and at least one price', () => {
   const idOnly = renderRatesView(module, state, sent, { draft: { id: 'my-vendor/my-model', input: '', output: '', cacheRead: '', cacheWrite: '' } })
   assert.equal(findButtons(findByClass(idOnly, 'tl-manual-form'), 'save')[0].props.disabled, true, 'a row of dashes is not worth creating')
 
-  const ready = renderRatesView(module, state, sent, { draft: { id: 'my-vendor/my-model', input: '0.5', output: '', cacheRead: '', cacheWrite: '' } })
+  const ready = renderRatesView(module, state, sent, { draft: { id: 'my-vendor/my-model', input: '3.5617', output: '', cacheRead: '', cacheWrite: '' } })
   const readySave = findButtons(findByClass(ready, 'tl-manual-form'), 'save')[0]
   assert.equal(readySave.props.disabled, false)
   readySave.props.onClick()
+  // Typed as ¥3.5617, stored as the $0.5 it is worth at the shown rate.
   assert.deepEqual(sent, [{ models: { 'my-vendor/my-model': { input: 0.5, output: null, cacheRead: null, cacheWrite: null } } }])
 })
 

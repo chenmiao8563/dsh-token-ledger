@@ -116,6 +116,50 @@ test('a model with no published price never takes a vendor quota slot', () => {
   assert.equal(parsed.selected, 2)
 })
 
+test('only the most familiar vendors are published, in a stable order', () => {
+  // Twenty vendors, five of them the ones a reader looks for first. The list has
+  // to be capped, and the cap has to be spent on the familiar ones rather than
+  // handed to whoever happens to ship the most models this week.
+  const data = []
+  for (const vendor of ['obscure-a', 'qwen', 'obscure-b', 'openai', 'obscure-c', 'deepseek']) {
+    for (let index = 0; index < 4; index += 1) {
+      data.push(model(`${vendor}/m${index}`, 1000 + index, { prompt: '0.000001', completion: '0.000002' }))
+    }
+  }
+  for (let index = 0; index < 14; index += 1) {
+    data.push(model(`filler-${index}/m`, 1000, { prompt: '0.000001', completion: '0.000002' }))
+  }
+
+  const parsed = parseCatalogue({ data }, { vendorLimit: 3 })
+  assert.equal(parsed.availableVendorCount, 20, 'every vendor the source listed is counted')
+  assert.equal(parsed.vendors.length, 3, 'but only three are published')
+  assert.deepEqual(
+    parsed.vendors.map((entry) => entry.vendor),
+    ['openai', 'deepseek', 'qwen'],
+    'the three that survived are the familiar ones, in the curated order',
+  )
+  assert.equal(parsed.selected, 9, 'three newest models each')
+
+  // The default cap, and the escape hatch that publishes everything.
+  assert.equal(parseCatalogue({ data }).vendors.length, 15)
+  assert.equal(parseCatalogue({ data }, { vendorLimit: 0 }).vendors.length, 20)
+  assert.equal(parseCatalogue({ data }, { vendorLimit: 0 }).selected, 6 * 3 + 14, 'three newest per vendor, plus the one-model publishers')
+})
+
+test('a publisher alias is never published as a vendor', () => {
+  // OpenRouter publishes `~vendor/model-latest` floating aliases. Listing them
+  // would show the same vendor twice under a name nobody recognises.
+  const payload = {
+    data: [
+      model('~openai/gpt-astra-latest', 9000, { prompt: '0.000001', completion: '0.000002' }),
+      model('openai/gpt-astra', 8000, { prompt: '0.000001', completion: '0.000002' }),
+    ],
+  }
+  const parsed = parseCatalogue(payload, { vendorLimit: 0 })
+  assert.deepEqual(parsed.vendors.map((entry) => entry.vendor), ['openai'])
+  assert.equal(parsed.selected, 1)
+})
+
 test('an empty or malformed payload yields an empty catalogue rather than throwing', () => {
   for (const payload of [undefined, null, {}, { data: 'nope' }, { data: [null, 5, {}] }]) {
     const parsed = parseCatalogue(payload)

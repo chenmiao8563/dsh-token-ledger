@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm test` — 174 tests in 11 files, no dependencies to install, no network. The
+`npm test` — 180 tests in 11 files, no dependencies to install, no network. The
 suite replaces `globalThis.fetch` for the duration of a mount, so the pricing
 refresh is exercised against a host with no route to the internet and no test can
 reach the real one:
@@ -28,9 +28,9 @@ reach the real one:
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
 | `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
 | `test/route.test.mjs` | 24 | both routes: the loopback and origin guard, unsupported methods, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 path |
-| `test/rates.test.mjs` | 15 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection, variant and retired-model exclusion, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
+| `test/rates.test.mjs` | 18 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection, the curated vendor cap and its order, alias exclusion, variant and retired-model exclusion, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
 | `test/rates-service.test.mjs` | 9 | fetch, cache and schedule: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, and every transport fault is reported instead of thrown |
-| `test/client.test.mjs` | 33 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
+| `test/client.test.mjs` | 37 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the currency conversion and the USD fallback, the brand marks, the column geometry that keeps model names visible, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
 | `test/client-render.test.mjs` | 13 | the same views under the real React, asserting the actual markup and that the library raises no complaint |
 | `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
 
@@ -381,26 +381,31 @@ Run on Windows against the real endpoints, through `createRatesService` — not 
 reimplementation of it:
 
 ```
-refresh outcome: {"catalogue":"ok (123 models, 56 vendors)","fx":"ok (1 USD = 6.725314 CNY)"}
+refresh outcome: {"catalogue":"ok (45 models, 15 of 49 vendors)","fx":"ok (1 USD = 6.725314 CNY)"}
 catalogue.totalAvailable: 445
-catalogue.vendorCount: 56
-catalogue.modelCount: 123
-cache file bytes: 53777
+catalogue.vendorCount: 15
+catalogue.modelCount: 45
+fx.available: true rate: 6.725314 USD->CNY
+first vendors: openai (gpt-6-astra in=10 out=50), anthropic (claude-fable-5.1 in=10 out=50),
+               google, deepseek, qwen, x-ai, meta-llama, mistralai, z-ai, moonshotai, …
 ```
 
-445 entries in the response selected down to **123 priced rows across 56
-vendors**, at most three per vendor, in a 53 KB cache file. Both endpoints answer
-without a key. The largest vendors by priced models were `openai` (60), `qwen`
-(51) and `google` (29), and a spot check of the first row read
-`openai/gpt-6-astra in=10 out=50 cacheRead=1 cacheWrite=12.5` — USD per million
-tokens, matching what the vendor publishes.
+445 entries in the response selected down to **45 rows across 15 of 49 vendors**,
+at most three per vendor, in an 11 KB payload — down from the 123 rows and 30 KB
+the view carried before the vendor cap. The order is the curated one, not model
+count. Both endpoints answer without a key.
 
 This probe is what found the negative-price sentinel. Five entries in the live
 list carry `pricing: {prompt: "-1", completion: "-1"}` (the `openrouter/auto*`
 routers, which have no single price). A negative number is not a price and must
-not be rendered as `$0`; those rows are dropped, and after that change **no
+not be rendered as `¥0`; those rows are dropped, and after that change **no
 published row carries a price-free row at all**. 46 rows have no cache-read price,
 which is why the table renders a dash rather than inventing one.
+
+A separate probe listed every vendor id the live catalogue actually uses, because
+the curated list has to be spelled the way the source spells it: `meta-llama` and
+`x-ai` are real ids while `meta` and `xai` are not, and `~openai` is an alias that
+has to be excluded rather than counted as a vendor.
 
 ### Both routes over a real socket
 

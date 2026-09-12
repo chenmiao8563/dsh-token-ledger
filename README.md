@@ -177,12 +177,22 @@ tabs: **Overview** and **Rates**.
   cost**, and it says so on the page.
 - **Each vendor's newest models**, two to three per vendor, with the published
   price per million tokens for input, output, cache read and cache write. Prices
-  are USD; a price the vendor does not publish is a dash, which is a different
-  claim from "free".
-- **Hand entry.** Any price, and the rate itself, can be typed over. A typed value
-  outranks every later fetch, is marked as hand-entered in the table, and can be
-  handed back to the fetched value or cleared. There is also a free-form entry row
-  for a model that no fetch has described.
+  are **converted into yuan** with the rate above; every converted cell keeps the
+  dollar quote it came from in its tooltip, and with no rate fetched the table
+  falls back to USD and labels its column in dollars rather than printing a number
+  it cannot stand behind. A price the vendor does not publish is a dash, which is a
+  different claim from "free".
+- **The fifteen most familiar vendors**, in a curated order rather than by model
+  count: the live list runs to 59, most of them one-model publishers nobody is
+  shopping for, and a table of 59 is not a price list either. Each vendor carries a
+  two-letter brand mark in its own colour, drawn by the page so it works offline; a
+  vendor outside the curated list gets a mark too, coloured from a hash of its name.
+  `rates.vendors: 0` publishes every vendor.
+- **Hand entry.** Any price, and the rate itself, can be typed over — in the
+  currency the table is showing. A typed value outranks every later fetch, is
+  marked as hand-entered in the table, and can be handed back to the fetched value
+  or cleared. There is also a free-form entry row for a model that no fetch has
+  described.
 - **Offline is a state, not an error.** The host refreshes prices and the rate
   every 30 minutes. A failed refresh keeps the last good result and reports the
   attempt as failed, so a firewalled machine sees the last known prices with a
@@ -225,6 +235,7 @@ Override the composition entry by its `id`:
     # rates:
     #   refreshIntervalMs: 1800000       # default: 30 minutes
     #   perVendor: 3                     # default: 3 newest models per vendor
+    #   vendors: 15                      # default: the 15 most familiar; 0 publishes every vendor
     #   modelsUrl: 'https://…/models'    # default: OpenRouter's public model list
     #   fxUrl: 'https://…/latest/USD'    # default: open.er-api.com
 ```

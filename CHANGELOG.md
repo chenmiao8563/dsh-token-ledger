@@ -57,11 +57,47 @@ section now has **概览 / Overview** and **费率 / Rates** tabs at the top.
   the re-read state, so a save is one round trip and the page never shows a value
   the host rejected.
 
+### Changed, after looking at the page
+
+Four things only a person reading the rendered table could have asked for:
+
+- **Prices are shown in yuan.** The table is quoted in CNY and converted with the
+  rate in the box above it. The rate remains display only, so the page still
+  computes no cost; each converted cell keeps the dollar quote it came from in its
+  tooltip, so a number on screen stays traceable to what the vendor published. With
+  no rate fetched there is nothing to convert with, so the table falls back to USD,
+  says so in a note, and labels its column in dollars rather than printing a
+  number it cannot stand behind.
+- **The model-name column no longer collapses.** With four fixed price columns and
+  a 150px action column, a narrow panel left the name column zero pixels wide, so
+  the table showed a price list for models nobody could identify. The name column
+  now has a floor, the action buttons are compact, and the table scrolls sideways
+  instead of squeezing: a panel narrower than the table scrolls, it does not lie.
+- **Each vendor carries a brand mark.** Two letters in the vendor's own colour,
+  drawn by the page. A real logo is an asset that has to be shipped (and licensed)
+  or fetched at page load, and fetching one would put a network dependency in a
+  page whose whole point is that it works offline. A vendor nobody curated still
+  gets a mark, coloured from a hash of its name so it stays the same across
+  refreshes, because one blank leading cell makes the column look broken.
+- **Fifteen vendors, not fifty-nine.** The list is capped to the most familiar
+  vendors in a curated order rather than by model count — sorting by count alone
+  puts `qwen` above `anthropic` and drifts whenever a publisher ships a batch. The
+  ids were read off the live list rather than guessed. Publisher aliases
+  (`~openai/model-latest`) are excluded outright; counting them would list a vendor
+  twice under a name nobody recognises. The status line reads `showing 15 / 49`
+  rather than `15`, because a bare count reads as "the list has 15 vendors", which
+  is not what happened. `rates.vendors: 0` publishes all of them; at the default
+  the payload drops from 30 KB to 11 KB.
+
 ### Notes
 
 - Prices are stored as **USD per one million tokens**, which is how vendors quote
   them and how a person reads them. The scaling happens once, at the edge, so
-  nothing downstream has to remember which unit it holds.
+  nothing downstream has to remember which unit it holds. The display conversion
+  goes the other way, at the last moment, from the same rate the table showed —
+  including in the price editor, so typing into a table that reads ¥ does not mean
+  typing dollars. Converting back rounds to the six decimals the host keeps, so a
+  value that leaves and returns unchanged comes back identical.
 - **A model the source gives no price for is not published.** The live list marks
   a router that has no single price with the sentinel `prompt: "-1"`,
   `completion: "-1"` — five entries when this was written. A negative price is not
