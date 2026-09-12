@@ -4,9 +4,125 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-09-12
 
-Nothing yet.
+A third view: what the tokens actually cost, grouped the way a bill is read —
+by vendor, by workspace, by session, by model, or by plan — with a CSV or JSON
+export that is the same computation the page is showing. This release also
+carries the refresh-and-settle work on the rates view (the *Added*, *Changed*
+and most of the *Fixed* entries below), which was written alongside it and had
+not shipped yet.
+
+### Added
+
+- **账单 / Bill: the ledger as a bill.** A fourth tab groups the same usage five
+  ways and states a cost for each group, with the call count, the four token
+  buckets collapsed to what a bill shows, and the cache hit rate:
+  - **By vendor, by workspace, by session or by model.** Workspace comes from the
+    `cwd` the ledger records per session, so a row is a directory that was
+    actually worked in rather than a label someone typed.
+  - **By plan.** `subscriptions` in the plugin config takes monthly plans
+    (`{ vendor, plan, amount, currency, startedAt?, endedAt?, note? }`) and the
+    month's fee is spread over the days the bill covers — so the 1st-to-10th of a
+    ¥199 month is ¥66.33, not ¥199. A plan row shows what the plan covered beside
+    what it charged; the pay-as-you-go line gathers everything off-plan. A plan is
+    never added to the usage it covers: the vendor it belongs to is billed the
+    plan (79.60 in the live check below, on usage that would have cost 444.31),
+    and a plan whose vendor has no usage at all is still billed, because it was
+    still paid for.
+  - **A period** — week, month, year or all — with the same trailing-window
+    definitions the overview uses.
+  - **Export, top right: CSV or JSON.** Both read the same route with the same
+    grouping and period, so an exported file is the page, not a second
+    implementation of the arithmetic. The CSV carries the currency on every row
+    and a `TOTAL` line.
+  - **What it could not price is listed, not charged at zero**: each unpriced
+    model with its tokens, its calls and the reason (no price, an ambiguous name,
+    or a price in a currency the bill cannot convert), plus every price joined by
+    name rather than by id, so a join can be checked rather than trusted.
+- **DeepSeek's peak and off-peak prices are billed as the ledger recorded them.**
+  A usage row knows which of its calls fell in the window (Beijing time, weekday
+  09:00–12:00 and 14:00–18:00), so the two sides are priced at their own rates —
+  2 / 8 per million input / output at peak against 1 / 4 off it — rather than
+  being charged at one rate. The ledger records this as ledger version 4: a
+  `usage` cross table (day × session × model, split by period) and each session's
+  `cwd`. An older ledger is rebuilt on first write; `rebuild` does it explicitly.
+- **Refresh on demand, then settle each disagreement.** The prices card grew a
+  **刷新价格 / Refresh prices** button that runs the fetch the timer would run,
+  so a reader looking at a stale number does not have to wait up to half an hour
+  for it. The fetch reads the sources in turn and can take a while, so the button
+  says which of the two things it is doing; a source that could not be reached is
+  reported as a failed refresh rather than as a save. It will not ask the page to
+  decide anything: the outcome is only reported.
+- **A disagreement between a typed price and a published one is put to the
+  reader.** When a model has a hand-typed price and the catalogue publishes a
+  different number for the same bucket, that model gets a card of its own listing
+  each differing field as *yours → official*, with two answers. **Use official**
+  deletes the typed value, handing the field back to the catalogue — an override
+  equal to the published price would freeze the row at today's number instead of
+  following it. **Keep mine** records the official numbers that were on screen in
+  the override's own `ack`, so the same disagreement is not raised again until the
+  catalogue actually moves.
+  - The page sends **price key names and never numbers**: the host is the one that
+    knows what the catalogue publishes now, and a number taken from the page's
+    copy of the payload could be stale by the time it is written down.
+  - The two numbers are formatted at the finer of their two precisions, because
+    the pair exists to be compared: at the table's two decimals a cache-write
+    price reads as `¥0.00` for both and hides the difference being asked about.
+  - `POST /api/token-ledger/rates` accepts `{ refresh: true }`, `{ adopt: {...} }`
+    and `{ keep: {...} }` alongside a plain patch, and answers with the refresh
+    outcome and the re-read state.
+
+### Changed
+
+- **The ledger keeps a usage cross table and each session's working directory.**
+  `LEDGER_VERSION` is 4: alongside the day and model tables it now stores one row
+  per day × session × model, with the calls and tokens split by price period, and
+  each session's `cwd`. Both are what make a bill by workspace or by session, and
+  a peak-aware cost, possible at all. A version-3 ledger is read as it is and
+  rewritten in the new shape on the next write; `dsh-token-ledger rebuild` does
+  the same on demand, and the rebuild is idempotent — the same sessions produce
+  the same totals.
+- **The settings page has four tabs**: 概览 / Overview, 费率 / Rates, 账单 / Bill
+  and the existing views, and only the tab that is open reads its route. Opening
+  the bill costs one request, not three, and the prices are still fetched only
+  when the rates tab is opened.
+- **A row is marked as hand-entered only when the number actually changed.**
+  Typing the value the fetch already produces stores it but leaves the row
+  unmarked: the mark means "a refresh will not change this", and a row a refresh
+  would reproduce unchanged does not need protecting.
+- **The hand-entered mark sits with the model name** rather than out among the
+  buttons, where it read as an action. The name yields first (it truncates), so a
+  long id cannot push the mark out of its cell.
+
+### Fixed
+
+- **Price inputs in a row no longer overlap.** The table declared `width: 100%`
+  without `box-sizing`, so every input was its column's width *plus* 16px of
+  padding and 2px of border — 11px wider than the 7px gap it sat in. `border-box`
+  on the shared input class fixes the row editor and the hand-entry form at once.
+- **The price columns sit closer to the model name, and the list no longer
+  scrolls sideways on a panel that is a little too narrow for it.** The name
+  column's floor drops from 190px to 150px and the gaps from 7px to 6px, and the
+  four price tracks are declared as a range rather than a fixed width (60–72px).
+  The table therefore narrows to 504px, down from 597px, before it grows a
+  scrollbar: measured in a browser, a 540px panel now fits with no sideways
+  scrollbar, where the old 597px table needed 630px, and at that size the first
+  price column starts 41px further left. A panel wide enough for the full table
+  is unchanged. Names give way first — they truncate, with the model id kept in
+  the tooltip.
+- **The model list no longer has a scrollbar of its own.** The rates list used to
+  be a 460px-tall box that scrolled inside the card, one scrollbar away from the
+  settings panel's own; it now grows to its full height and lets the panel scroll.
+  The sideways scroll stays, for a panel narrower than the table's 504px floor.
+- **The peak / off-peak label is no longer cut down to one character.** It was
+  drawn inside the model-name span, and that span is the piece that clips its text,
+  so on a long id the pill lost half of itself: measured in a browser,
+  `DeepSeek-V4-Pro-0813` needs 172px of name cell for its name plus label against
+  the 158px it has, which left 高 / 空 on screen where the two rows most need to be
+  told apart. The label is now a sibling of the name in the same flex row, so the
+  name gives way and the pill stays whole. Its own 6px margin went with it, since
+  the row already spaces its items.
 
 ## [0.4.0] - 2026-09-10
 
@@ -319,7 +435,9 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.1.0...v0.1.1

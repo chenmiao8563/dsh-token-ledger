@@ -12,8 +12,10 @@ import { EventEmitter } from 'node:events'
 import { test } from 'node:test'
 
 import {
+  BILL_PATH,
   OVERVIEW_PATH,
   RATES_PATH,
+  createBillRoute,
   createOverviewRoute,
   createRatesRoute,
   isAllowedPeer,
@@ -207,13 +209,16 @@ test('the clock is injectable, so the payload is deterministic under test', () =
 /**
  * A stand-in rates service.
  *
- * @param {{ read?: () => object, saveOverrides?: (body: unknown) => object }} [parts] - behaviour overrides.
+ * @param {{ read?: () => object, saveOverrides?: (body: unknown) => object, refresh?: (trigger: object) => Promise<object> }} [parts] - behaviour overrides.
  * @returns {object} the service.
  */
 function fakeRates(parts = {}) {
   const saved = []
   return {
     saved,
+    // The real service always has one; a test that does not ask for a refresh
+    // should not have to say so, hence the spread rather than a default.
+    ...(parts.refresh === undefined ? {} : { refresh: parts.refresh }),
     read:
       parts.read ??
       (() => ({
@@ -395,6 +400,57 @@ test('a valid POST stores the patch and returns the re-read state', async () => 
   assert.equal(body.rates.fx.rate, 7.1)
 })
 
+test('a POST asking for a refresh runs one and reports its outcome', async () => {
+  const seen = []
+  const route = createRatesRoute({
+    rates: fakeRates({
+      refresh: async (trigger) => {
+        seen.push(trigger)
+        return { catalogue: 'ok (6 models, 2 vendors)', fx: 'ok (1 USD = 7.1 CNY)' }
+      },
+    }),
+  })
+  const res = await callAsync(route, makeWriteReq({ body: JSON.stringify({ refresh: true }) }))
+  assert.equal(res.status, 200)
+  const body = JSON.parse(res.body)
+  assert.equal(body.refresh.catalogue, 'ok (6 models, 2 vendors)')
+  assert.deepEqual(seen, [{ reason: 'page' }], 'the refresh says who asked for it')
+  assert.equal(body.rates.plugin, 'token-ledger', 'and the caller still gets the state to render')
+})
+
+test('a write that does not ask for a refresh does not run one', async () => {
+  let calls = 0
+  const route = createRatesRoute({
+    rates: fakeRates({
+      refresh: async () => {
+        calls += 1
+        return { catalogue: 'ok', fx: 'ok' }
+      },
+    }),
+  })
+  for (const body of [{ models: { 'a/b': { input: 1 } } }, { refresh: 'yes' }, { refresh: false }]) {
+    const res = await callAsync(route, makeWriteReq({ body: JSON.stringify(body) }))
+    assert.equal(res.status, 200)
+    assert.equal(JSON.parse(res.body).refresh, null, JSON.stringify(body))
+  }
+  assert.equal(calls, 0)
+})
+
+test('a refresh that throws is a 502 and stores nothing', async () => {
+  const errors = []
+  const rates = fakeRates({
+    refresh: async () => {
+      throw new Error('socket hung up')
+    },
+  })
+  const route = createRatesRoute({ rates, options: { onError: (error) => errors.push(error) } })
+  const res = await callAsync(route, makeWriteReq({ body: JSON.stringify({ refresh: true }) }))
+  assert.equal(res.status, 502)
+  assert.equal(JSON.parse(res.body).error, 'refresh failed')
+  assert.deepEqual(rates.saved, [], 'a refresh that failed must not be mistaken for a patch')
+  assert.equal(errors.length, 1)
+})
+
 test('a patch the service rejects is a 400 carrying its reason', async () => {
   const route = createRatesRoute({
     rates: fakeRates({ saveOverrides: () => ({ ok: false, error: 'fx must be a positive number' }) }),
@@ -432,6 +488,205 @@ test('a faulting rates service becomes a 500 with a JSON body', async () => {
   assert.equal(writeRes.status, 500)
   assert.equal(JSON.parse(writeRes.body).error, 'could not save')
   assert.equal(writeErrors.length, 1)
+})
+
+/* ------------------------------------------------------------------- bill -- */
+
+/**
+ * A stand-in request carrying a query string.
+ *
+ * @param {{ method?: string, url?: string, address?: string, origin?: string }} [options] - request shape.
+ * @returns {object} the request.
+ */
+function makeBillReq({ method = 'GET', url = BILL_PATH, address = '127.0.0.1', origin } = {}) {
+  return { ...makeReq({ method, address, origin }), url }
+}
+
+/** A catalogue in the shape the rates service serves, with one priced vendor. */
+function billCatalogue() {
+  return {
+    currency: 'USD',
+    quote: 'CNY',
+    priceSource: 'modelsdev',
+    fx: { available: true, rate: 7, base: 'USD', quote: 'CNY', overridden: false },
+    vendors: [
+      {
+        vendor: 'acme',
+        currency: 'USD',
+        models: [{ id: 'acme/one', name: 'one', vendor: 'acme', prices: { input: 1, output: 2, cacheRead: 0, cacheWrite: null } }],
+      },
+    ],
+  }
+}
+
+/** The day the bill clock stands on, and the day the fixture's usage falls on. */
+const BILL_DAY = '2026-09-30'
+
+/** A ledger snapshot with one priced day of usage, on the bill's day. */
+function billSnapshot() {
+  const counters = { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 1_000_000, reasoningTokens: 0 }
+  return {
+    version: 4,
+    sessions: [{ sessionId: 's1', cwd: 'D:\\proj' }],
+    usage: [
+      {
+        date: BILL_DAY,
+        sessionId: 's1',
+        model: 'acme-official/one',
+        calls: 3,
+        ...counters,
+        peak: { ...counters },
+        offPeak: { ...counters, inputTokens: 0, totalTokens: 0 },
+      },
+    ],
+  }
+}
+
+/** The bill route over deterministic dependencies. */
+function billRoute(options = {}) {
+  return createBillRoute({
+    snapshot: options.snapshot ?? billSnapshot,
+    catalogue: options.catalogue ?? billCatalogue,
+    subscriptions: options.subscriptions ?? [],
+    options: { now: () => new Date(2026, 8, 30, 12, 0, 0), ...(options.options ?? {}) },
+  })
+}
+
+test('the bill route is exact on the documented path', () => {
+  const route = billRoute()
+  assert.equal(route.kind, 'exact')
+  assert.equal(route.path, BILL_PATH)
+  assert.equal(BILL_PATH, '/api/token-ledger/bill')
+  assert.equal(typeof route.handler, 'function')
+})
+
+test('a bill is served as uncacheable JSON, grouped and ranged by the query', () => {
+  const route = billRoute({ snapshot: () => billSnapshot() })
+  const res = call(route, makeBillReq({ url: `${BILL_PATH}?by=workspace&range=all` }))
+  assert.equal(res.status, 200)
+  assert.match(res.headers['content-type'], /application\/json/)
+  assert.equal(res.headers['cache-control'], 'no-store')
+  const body = JSON.parse(res.body)
+  assert.equal(body.plugin, 'token-ledger')
+  assert.equal(body.by, 'workspace')
+  assert.equal(body.range.kind, 'all')
+  assert.deepEqual(body.rows.map((row) => row.label), ['D:\\proj'])
+  assert.equal(body.rows[0].calls, 3)
+  assert.equal(body.totals.calls, 3)
+  // 1M input at 1 USD per million, converted at the rate on the catalogue.
+  assert.equal(body.totals.totalCost, 7)
+  assert.equal(body.totals.usageCost, 7, 'with no plan the two agree')
+  assert.equal(body.currency, 'CNY')
+})
+
+test('the default bill is by vendor over the month, with no query at all', () => {
+  const body = JSON.parse(call(billRoute(), makeBillReq()).body)
+  assert.equal(body.by, 'vendor')
+  assert.equal(body.range.kind, 'month')
+  assert.deepEqual(body.rows.map((row) => row.label), ['acme'])
+})
+
+test('an unknown dimension or range bills the default rather than failing', () => {
+  // A bookmarked link with a stale parameter is still a bill.
+  const res = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?by=nonsense&range=nonsense` }))
+  assert.equal(res.status, 200)
+  const body = JSON.parse(res.body)
+  assert.equal(body.by, 'vendor')
+  assert.equal(body.range.kind, 'month')
+})
+
+test('format=csv returns a downloadable attachment, not JSON', () => {
+  const res = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=vendor` }))
+  assert.equal(res.status, 200)
+  assert.match(res.headers['content-type'], /text\/csv/)
+  assert.equal(res.headers['content-disposition'], 'attachment; filename="token-bill-vendor-2026-09-30.csv"')
+  assert.equal(res.headers['cache-control'], 'no-store')
+  const lines = res.body.trim().split('\r\n')
+  assert.equal(lines.length, 3, 'a header, the one vendor and the total')
+  assert.ok(lines[0].startsWith('group,calls,'))
+  assert.ok(lines.at(-1).startsWith('TOTAL,'))
+
+  // The attachment name follows the grouping it was asked for.
+  const bySession = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=session` }))
+  assert.equal(bySession.headers['content-disposition'], 'attachment; filename="token-bill-session-2026-09-30.csv"')
+})
+
+test('a CSV export is the same arithmetic the page shows', () => {
+  const route = billRoute()
+  const json = JSON.parse(call(route, makeBillReq()).body)
+  const csv = call(route, makeBillReq({ url: `${BILL_PATH}?format=csv` })).body.trim().split('\r\n')
+  assert.equal(csv.length, json.rows.length + 2)
+  const total = csv.at(-1).split(',')
+  assert.equal(Number(total[8]).toFixed(4), Number(json.totals.totalCost).toFixed(4))
+})
+
+test('a bill HEAD request is served', () => {
+  const res = call(billRoute(), makeBillReq({ method: 'HEAD' }))
+  assert.equal(res.status, 200)
+})
+
+test('writing to the bill route is refused', () => {
+  for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+    const res = call(billRoute(), makeBillReq({ method }))
+    assert.equal(res.status, 405, method)
+    assert.equal(JSON.parse(res.body).error, 'method not allowed')
+  }
+})
+
+test('a bill is refused from off the machine and from another origin', () => {
+  for (const address of ['192.168.1.20', '203.0.113.9']) {
+    const res = call(billRoute(), makeBillReq({ address }))
+    assert.equal(res.status, 403, address)
+    assert.equal(JSON.parse(res.body).error, 'forbidden')
+  }
+  assert.equal(call(billRoute(), makeBillReq({ origin: 'https://evil.example' })).status, 403)
+  // The desktop IPC bridge has no peer address and must keep working.
+  assert.equal(call(billRoute(), makeBillReq({ address: undefined })).status, 200)
+})
+
+test('a faulting ledger or rate service is a 500, never a thrown handler', () => {
+  const errors = []
+  const options = { onError: (error) => errors.push(error) }
+  const fromLedger = call(
+    billRoute({
+      snapshot: () => {
+        throw new Error('ledger is broken')
+      },
+      options,
+    }),
+    makeBillReq(),
+  )
+  assert.equal(fromLedger.status, 500)
+  assert.equal(JSON.parse(fromLedger.body).error, 'bill unavailable')
+
+  const fromRates = call(
+    billRoute({
+      catalogue: () => {
+        throw new Error('cache is corrupt')
+      },
+      options,
+    }),
+    makeBillReq(),
+  )
+  assert.equal(fromRates.status, 500)
+  assert.equal(errors.length, 2)
+  assert.match(String(errors[0].message), /ledger is broken/)
+})
+
+test('a bill with plans reports the plan, and keeps the totals honest', () => {
+  const route = billRoute({
+    subscriptions: [{ vendor: 'acme', plan: 'Acme Pro', amount: 100, currency: 'CNY', startedAt: '2026-09-01' }],
+  })
+  const body = JSON.parse(call(route, makeBillReq({ url: `${BILL_PATH}?by=subscription&range=month` })).body)
+  assert.equal(body.subscriptions.length, 1)
+  assert.equal(body.subscriptions[0].share, 100)
+  const planRow = body.rows.find((row) => row.plan === true)
+  const usageRow = body.rows.find((row) => row.plan === false)
+  assert.equal(planRow.cost, 100, 'the plan is what the month cost')
+  assert.equal(planRow.usageCost, 7, 'and the usage it covered is beside it, not added to it')
+  assert.equal(usageRow.cost, 0, 'nothing is off-plan here')
+  assert.equal(body.totals.totalCost, 100, 'no double counting')
+  assert.equal(body.totals.usageCost, 7)
 })
 
 test('the rates guard matches the overview guard, on both reads and writes', async () => {

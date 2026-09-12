@@ -1,13 +1,13 @@
 # Verification
 
-What was actually verified for `dsh-token-ledger` 0.1.0, on what, and how. The
+What was actually verified for `dsh-token-ledger`, on what, and how. The
 point of this file is to be checkable and to state its own gaps.
 
 ## Environment
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-09-10 |
+| Date | 2026-09-12 (0.5.0; the 0.4.0 runs below were on 2026-09-10) |
 | OS | Windows (win32) |
 | Node.js | v24.18.0 |
 | DSH | 0.1.2-rc.1 (packaged desktop build) |
@@ -15,29 +15,33 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm test` — 200 tests in 12 files, no dependencies to install, no network. The
+`npm run test:single-process` — **261 tests in 13 files, all passing**, with no
+dependencies to install and no network. (That is the same suite as `npm test`;
+the per-file process isolation Node uses by default cannot `spawn` on this
+machine, so the isolation-free runner is the one used here.) The
 suite replaces `globalThis.fetch` for the duration of a mount, so the pricing
 refresh is exercised against a host with no route to the internet and no test can
 reach the real one:
 
 | File | Tests | Covers |
 | --- | --- | --- |
-| `test/ledger.test.mjs` | 21 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, and a property-style cross-check against an independent naive implementation over 25 generated logs |
+| `test/ledger.test.mjs` | 27 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, the peak/off-peak split and the usage cross table, workspace capture, and a property-style cross-check against an independent naive implementation over 25 generated logs |
 | `test/cli.test.mjs` | 13 | rebuild/audit/rebuild-write/export over synthetic homes, pending-vs-stale classification, tamper detection, exit codes, torn logs |
-| `test/plugin.test.mjs` | 20 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, `/tokens` variants, degraded services, config overrides, both routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
+| `test/plugin.test.mjs` | 20 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, `/tokens` variants, degraded services, config overrides, all three routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
 | `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
-| `test/route.test.mjs` | 24 | both routes: the loopback and origin guard, unsupported methods, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 path |
-| `test/rates.test.mjs` | 23 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
-| `test/rates-service.test.mjs` | 12 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
-| `test/client.test.mjs` | 40 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
+| `test/bill.test.mjs` | 18 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by vendor/model/workspace/session, each range including "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers on every row that spans it, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, and the CSV |
+| `test/route.test.mjs` | 38 | all three routes: the loopback and origin guard, unsupported methods, the bill's grouping/range query with its fallbacks, the CSV download and its filename, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 paths |
+| `test/rates.test.mjs` | 27 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, the adopt/keep decision, and the input validator |
+| `test/rates-service.test.mjs` | 13 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
+| `test/client.test.mjs` | 51 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, all three views' rendering logic, the bill's tabs and export links, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that each view reads its route only when it is opened |
 | `test/vendor-prices.test.mjs` | 9 | the vendor pricing-page adapters: the HTML helpers, a price written as `0.15元` and as `输入：0.5元`, DeepSeek's merged label cells and both time-of-day columns, Z.ai's storage column that sometimes says "Limited-time Free", Tencent's label-embedded prices, and a row per period |
-| `test/client-render.test.mjs` | 13 | the same views under the real React, asserting the actual markup and that the library raises no complaint |
+| `test/client-render.test.mjs` | 20 | the same views under the real React, asserting the actual markup, the bill's export URLs and money columns, and that the library raises no complaint |
 | `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
 
 The React-dependent files skip with a stated reason when `react` and `react-dom`
 are not resolvable, which keeps `npm test` working from a fresh clone with no
-network.
+network. The counts above were taken with React resolvable, so none skipped.
 
 ## Evidence from real session logs
 
@@ -611,6 +615,77 @@ is the same thing as before: nobody has looked at the rendered page.
 The isolated host was then stopped by port, and the machine's real DSH instance
 (a different process, on its own port) was confirmed still listening.
 
+## The bill, 0.5.0 — real ledger, real prices, real host
+
+Three separate things were checked: the arithmetic over the real ledger, the
+route inside a real DSH web server, and the exported file matching the response.
+
+### What the real ledger bills
+
+The ledger was rebuilt from this machine's 140 stored sessions into the version-4
+shape (`dsh-token-ledger rebuild --ledger … --write`): **1,781,106,633 tokens**
+across **8,283 calls**, of which **796,057,786** were recorded inside DeepSeek's
+peak window and **985,048,847** outside it. The bill was then computed against a
+freshly fetched live catalogue (fx **6.725314**):
+
+```
+by vendor          calls        input       output     hit          cost
+deepseek           5,478  213,824,029    4,111,258   83.8%    CNY 444.31
+qwen               1,924   19,451,225    2,199,720   94.0%     CNY 63.98
+z-ai                 881   13,773,217    1,152,944   89.3%     CNY 53.55
+
+by workspace
+E:\bosc_project\torchv-master  2,218  165,436,946  1,231,026  48.6%  CNY 331.55
+…
+```
+
+Every model that appeared in the ledger was priced: **zero unpriced rows**, and
+seven joins, six of them exact. The DeepSeek route in the log
+(`deepseek-official/deepseek-v4-flash`) matches no price id directly and is joined
+by name to `deepseek/deepseek-flash`, which is exactly the kind of join the bill
+lists rather than hides.
+
+### The route inside a real DSH host
+
+An isolated `DSH_HOME`, a disposable `web` profile, the real ledger copied in, and
+one plan configured through the profile's patch layer
+(`- id: token-ledger` / `config.subscriptions`):
+
+```
+GET  /api/token-ledger/summary                                -> 200, 1350 bytes
+GET  /api/token-ledger/bill                                   -> 200, application/json
+GET  /api/token-ledger/bill?by=workspace&range=all            -> 200
+GET  /api/token-ledger/bill?by=session&range=all&format=csv   -> 200, text/csv
+     content-disposition: attachment; filename="token-bill-session-2026-09-12.csv"
+GET  /api/token-ledger/bill?by=nonsense&range=nonsense        -> 200, by=vendor, month
+GET  /api/token-ledger/bill  (Origin: https://evil.example)   -> 403
+POST /api/token-ledger/bill                                   -> 405
+```
+
+The plan was picked up from the host config and billed as a share of the days the
+bill covered — ¥199 for September 1–12 is **79.60**, and DeepSeek's row reads
+79.60 where its usage alone would have been 444.31:
+
+```
+by subscription        label                calls        cost     usageCost
+  (pay as you go)      [null]               2,805      117.54        117.54
+  DeepSeek 包月         [plan]               5,478       79.60        444.31
+  totals: usageCost 561.85 · subscriptionCost 79.60 · totalCost 197.14
+```
+
+197.14 is 79.60 + 117.54: the plan is not added to the usage it covers. The CSV
+ended with `TOTAL,8283,…,197.1369,CNY`, the same number to four decimals as the
+JSON `totals.totalCost` — which is the property the export exists to have.
+
+The browser half served by that host was read back too: the boot page's bundle
+list names `@chenmiao8563/dsh-token-ledger/client.js`, and the 3.86 MB bundle the
+host serves contains `tabBill`, `billTitle`, `api/token-ledger/bill`,
+`billExportCsv`, `billCoveredUsage` and `tl-bill-total`. So the artifact a browser
+loads is the one with the bill tab in it.
+
+The isolated host was stopped by port afterwards, and this machine's real DSH
+instance on its own port was confirmed still listening.
+
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not
@@ -624,11 +699,13 @@ useful:
 - **Provider billing agreement.** The ledger counts what the session log
   records. It makes no claim about what a provider invoices, which can differ
   for failed, retried or partially delivered requests.
-- **The rates view in a real browser.** Both views are asserted under the real
-  React, their markup is checked, and the bundle the browser receives was fetched
-  from a running host — but no one has yet looked at the Rates tab on screen. The
-  0.3.0 round of feedback came from looking at the page; this one has not had that
-  pass.
+- **The rates view and the bill view in a real browser.** All three views are
+  asserted under the real React, their markup is checked, and the bundle the
+  browser receives was fetched from a running host — but no one has yet looked at
+  the **Rates** or **Bill** tab on screen. The 0.3.0 round of feedback came from
+  looking at the page; the rates and bill work has not had that pass. The bill's
+  CSV download in particular is asserted from the response headers and body, not
+  by clicking the button in a browser.
 - **The vendor marks as pixels.** Twelve bundled marks are checked structurally:
   each is diffed against the vendor's original file — same element sequence, same
   path geometry, same transforms, fill-rules, clip paths and classes — so a dropped
@@ -641,6 +718,14 @@ useful:
 - **Price accuracy.** The tables are asserted to carry what the source published,
   spot-checked against one vendor's published numbers. Nothing here verifies that
   a source is correct, current, or the price a given account is actually billed.
+- **The bill as an invoice.** The bill multiplies the tokens the session log
+  recorded by the list price of the model the route named. It has not been
+  reconciled against any provider's actual invoice, so it is an estimate with a
+  stated basis — not a claim about what was charged. Plan quotas are taken from
+  what the config says, and nothing here checks them against a provider's terms.
+- **A plan spanning several months.** The amortization is asserted for a partial
+  month and for a plan with a start or end date; a plan billed over a long range
+  is the same arithmetic repeated, not a separate path that has been observed.
 - **The 30-minute timer over a long run.** The interval is asserted to be
   configured and to fire and stop under test; that it keeps working across a
   multi-hour session, and that the host does not keep a process alive for it, is

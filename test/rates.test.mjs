@@ -313,6 +313,66 @@ test('a hand-entered price outranks a fetched one and is marked as such', () => 
   assert.equal(result.fx.source, 'fetched')
 })
 
+test('re-typing the fetched price is stored but does not mark the row', () => {
+  const vendors = parseCatalogue(cataloguePayload()).vendors
+  const overrides = { models: { 'acme/new-flash': { input: 0.2, output: 0.8, cacheRead: 0.02 } } }
+  const result = applyOverrides({ vendors, overrides })
+  const model = result.vendors.find((entry) => entry.vendor === 'acme').models.find((entry) => entry.id === 'acme/new-flash')
+  assert.equal(model.prices.input, 0.2, 'the typed value is still what the row shows')
+  assert.equal(model.source, 'fetched', 'a row a refresh would reproduce unchanged needs no protection')
+  assert.equal(result.overriddenModels, 0)
+
+  // One field away from the fetched value is a real override, and is marked as
+  // one — including the fields that were left alone.
+  const changed = applyOverrides({ vendors, overrides: { models: { 'acme/new-flash': { input: 0.2, output: 0.9 } } } })
+  const edited = changed.vendors.find((entry) => entry.vendor === 'acme').models.find((entry) => entry.id === 'acme/new-flash')
+  assert.equal(edited.source, 'manual')
+  assert.equal(edited.prices.input, 0.2)
+  assert.equal(edited.prices.cacheRead, 0.02, 'a field left alone keeps the fetched value')
+  assert.equal(changed.overriddenModels, 1)
+})
+
+test('a typed price that disagrees with the published one is listed for review', () => {
+  const vendors = parseCatalogue(cataloguePayload()).vendors
+  // What the catalogue publishes for acme/new-flash: 0.2 in, 0.8 out, 0.02 cached.
+  const result = applyOverrides({ vendors, overrides: { models: { 'acme/new-flash': { input: 0.42, output: 0.9, cacheRead: 0.02 } } } })
+  assert.equal(result.pending.length, 1, 'one entry per model, not one per field')
+  assert.equal(result.pending[0].id, 'acme/new-flash')
+  assert.equal(result.pending[0].vendor, 'acme')
+  assert.deepEqual(
+    result.pending[0].fields,
+    [
+      { key: 'input', manual: 0.42, official: 0.2 },
+      { key: 'output', manual: 0.9, official: 0.8 },
+    ],
+    'only the fields that differ, with both numbers so the page can show the choice',
+  )
+
+  // Typing the published number is not a disagreement, and neither is typing
+  // nothing at all.
+  assert.deepEqual(applyOverrides({ vendors, overrides: { models: { 'acme/new-flash': { input: 0.2 } } } }).pending, [])
+  assert.deepEqual(applyOverrides({ vendors, overrides: { models: { 'acme/never-listed': { input: 9 } } } }).pending, [], 'a model the fetch never described has no official price to differ from')
+})
+
+test('a reviewed disagreement stays settled until the official price moves', () => {
+  const vendors = parseCatalogue(cataloguePayload()).vendors
+  assert.equal(applyOverrides({ vendors, overrides: { models: { 'acme/new-flash': { input: 0.42 } } } }).pending.length, 1)
+
+  // "Keep mine" records the official number that was on screen when the answer
+  // was given, so the same disagreement is not put back in front of the reader.
+  const reviewed = { models: { 'acme/new-flash': { input: 0.42, ack: { input: 0.2 } } } }
+  const settled = applyOverrides({ vendors, overrides: reviewed })
+  assert.deepEqual(settled.pending, [], 'an answer already given is not asked again')
+  const row = settled.vendors.find((entry) => entry.vendor === 'acme').models.find((entry) => entry.id === 'acme/new-flash')
+  assert.equal(row.prices.input, 0.42, 'and the typed price is still the one shown')
+
+  // The catalogue moving to a new number is news again.
+  const moved = parseCatalogue({ data: [model('acme/new-flash', 3000, { prompt: '0.0000003', completion: '0.0000008' })] }).vendors
+  const again = applyOverrides({ vendors: moved, overrides: reviewed })
+  assert.equal(again.pending.length, 1)
+  assert.deepEqual(again.pending[0].fields, [{ key: 'input', manual: 0.42, official: 0.3 }])
+})
+
 test('a null override clears a price instead of zeroing it', () => {
   const vendors = parseCatalogue(cataloguePayload()).vendors
   const result = applyOverrides({ vendors, overrides: { models: { 'acme/new-flash': { input: null } } } })
@@ -392,6 +452,22 @@ test('validateOverrides refuses anything it cannot trust', () => {
   assert.equal(validateOverrides({ models: { a: { input: -2 } } }).ok, false)
   assert.equal(validateOverrides({ models: { a: { input: 'free' } } }).ok, false)
   assert.equal(validateOverrides({ models: { '': { input: 1 } } }).ok, false)
+})
+
+test('validateOverrides accepts the two review answers and nothing else', () => {
+  const accepted = validateOverrides({ adopt: { 'a/b': ['input', 'input', 'cacheWrite'] }, keep: { 'a/b': ['output'] } })
+  assert.equal(accepted.ok, true)
+  assert.deepEqual(accepted.patch.adopt, { 'a/b': ['input', 'cacheWrite'] }, 'a repeated key is named once')
+  assert.deepEqual(accepted.patch.keep, { 'a/b': ['output'] })
+
+  // Anything that is not a list of known price keys is refused rather than
+  // guessed at: a wrong key would delete the wrong price.
+  assert.equal(validateOverrides({ adopt: [] }).ok, false)
+  assert.equal(validateOverrides({ adopt: { 'a/b': 'input' } }).ok, false)
+  assert.equal(validateOverrides({ adopt: { 'a/b': ['input', 'prompt'] } }).ok, false)
+  assert.equal(validateOverrides({ keep: { '': ['input'] } }).ok, false)
+  // An empty list is a valid shape that decides nothing, so it names no model.
+  assert.deepEqual(validateOverrides({ adopt: { 'a/b': [] } }).patch, { adopt: {} })
 })
 
 test('validateOverrides keeps only the fields it understands', () => {

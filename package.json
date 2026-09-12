@@ -1,7 +1,7 @@
 {
   "name": "@chenmiao8563/dsh-token-ledger",
-  "version": "0.4.0",
-  "description": "Transparent, auditable token accounting for DeepSeek Harness: a restart-safe ledger over the durable session log, plus a CLI that recomputes it from raw logs and diffs the result.",
+  "version": "0.5.0",
+  "description": "Transparent, auditable token accounting for DeepSeek Harness: a restart-safe ledger over the durable session log, a CLI that recomputes it from raw logs and diffs the result, and a bill you can export as CSV or JSON.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -12,6 +12,8 @@
     "token-accounting",
     "usage-stats",
     "cost-tracking",
+    "billing",
+    "bill-export",
     "ledger",
     "audit",
     "llm-observability"
@@ -27,6 +29,7 @@
     "./session-log": "./lib/session-log.js",
     "./store": "./lib/store.js",
     "./overview": "./lib/overview.js",
+    "./bill": "./lib/bill.js",
     "./route": "./lib/route.js",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",

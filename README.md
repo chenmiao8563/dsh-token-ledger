@@ -30,10 +30,12 @@ scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
 If you only want a pretty chart, there are a dozen plugins for that. This one is
 for when you need to *defend* the number.
 
-Since 0.4 the settings page also has a **Rates** tab: a price table for each
-vendor's newest models and the live USD/CNY rate. It is a reference table — see
-[Settings page](#settings-page) — and it deliberately stops short of turning
-tokens into money.
+Since 0.5 the settings page has three tabs: **Overview** (the ledger), **Rates** (a
+price list for each vendor's newest models, with the live USD/CNY rate) and
+**Bill** (the same usage turned into money — by vendor, workspace, session, model
+or plan, exportable as CSV or JSON). The bill names the price source, the rate and
+every price it could not apply, so the number can be checked; the overview still
+counts tokens and stops there. See [Settings page](#settings-page).
 
 ## Why it installs where others do not
 
@@ -151,8 +153,8 @@ audit useless. The ledger's own `updatedAt` settles it:
 
 ## Settings page
 
-The browser half adds a **Token ledger** section to the settings sidebar, with two
-tabs: **Overview** and **Rates**.
+The browser half adds a **Token ledger** section to the settings sidebar, with
+three tabs: **Overview**, **Rates** and **Bill**.
 
 ### Overview
 
@@ -173,8 +175,9 @@ tabs: **Overview** and **Rates**.
 ### Rates
 
 - **The USD/CNY rate** in its own box, to four decimals, with its source and how
-  long ago it was fetched. It is shown for reference: this page computes **no
-  cost**, and it says so on the page.
+  long ago it was fetched. This tab is a price list: it states prices and converts
+  them for display, and says on the page that the cost arithmetic lives on the
+  **Bill** tab, where it is applied to the ledger.
 - **Each vendor's newest models**, two to three per vendor, with the published
   price per million tokens for input, output, cache read and cache write. A USD
   price is converted into yuan with the rate above; every converted cell keeps the
@@ -206,10 +209,21 @@ tabs: **Overview** and **Rates**.
   gets a mark and a place when a source carries it; `rates.vendors: 0` publishes
   every vendor.
 - **Hand entry.** Any price, and the rate itself, can be typed over — in the
-  currency the table is showing. A typed value outranks every later fetch, is
-  marked as hand-entered in the table, and can be handed back to the fetched value
-  or cleared. There is also a free-form entry row for a model that no fetch has
+  currency the table is showing. A typed value outranks every later fetch, and a
+  row whose number actually changed is marked as hand-entered; typing the value
+  the fetch already produces leaves the row unmarked, since a refresh would not
+  change it. Either way the row can be handed back to the fetched value or
+  cleared. There is also a free-form entry row for a model that no fetch has
   described.
+- **Refresh on demand, then settle each disagreement.** A button on the prices
+  card runs the same fetch the timer would, without waiting up to half an hour
+  for it; a fetch that could not reach a source says so instead of reporting a
+  save. When the official price for a model you typed over has moved, the model
+  is listed on its own with both numbers and one question — use the official
+  price, or keep yours. "Use official" deletes the typed value, handing the field
+  back to the catalogue rather than freezing it at today's number; "keep mine"
+  records the official number that was on screen, so the same disagreement is
+  not raised again until the catalogue actually moves.
 - **Offline is a state, not an error.** The host refreshes prices and the rate
   every 30 minutes. A failed refresh keeps the last good result and reports the
   attempt as failed, so a firewalled machine sees the last known prices with a
@@ -217,9 +231,45 @@ tabs: **Overview** and **Rates**.
   says so and points at the hand-entry form; a host configured with
   `rates: false` makes no request at all and is a price list you maintain.
 
-The page reads two loopback-only routes: `GET /api/token-ledger/summary` for the
-overview and `GET|POST /api/token-ledger/rates` for prices and the rate, polling
-the overview once a minute and prices when the rates tab is open. Both refuse a
+### Bill
+
+The same usage, grouped the way a bill is read, with a cost for each group.
+
+- **Five groupings**: by **vendor**, by **workspace**, by **session**, by **model**,
+  or by **plan**. A workspace row is the `cwd` the ledger recorded for the sessions
+  that ran there — a directory that was actually worked in, not a label. Every row
+  carries the call count, input, output, the cache hit rate and what it costs.
+- **Four periods**: this week, this month, this year or everything, using the same
+  trailing-window definitions as the overview.
+- **By plan, without double counting.** `subscriptions` in the config takes monthly
+  plans, and the fee is spread over the days the bill covers: the 1st-to-10th of a
+  ¥199 month is ¥66.33, not ¥199. A vendor on a plan is billed its plan and the
+  usage it covers is shown beside it rather than added to it — the reason the two
+  numbers are separate is that adding them would charge for the same calls twice. A
+  plan whose vendor has no usage in the period is still billed, because it was still
+  paid for.
+- **A CSV or JSON export, top right.** Both read the same route with the grouping
+  and period on screen, so the file is the page rather than a second implementation
+  of the arithmetic. The CSV carries the currency on every row and a `TOTAL` line.
+- **What it could not price is listed, not charged at zero**: each unpriced model
+  with its tokens, calls and the reason — no price for that model, an ambiguous name
+  that two vendors both publish, or a price in a currency the bill cannot convert.
+  Prices joined by name rather than by id are listed too, so a join can be checked
+  rather than trusted.
+- **A time-priced vendor is billed per side of its window.** DeepSeek prices peak
+  and off-peak differently, and the ledger records which calls fell inside the
+  window — 09:00–12:00 and 14:00–18:00 on weekdays, Beijing time — so the two are
+  priced at their own rates instead of being charged at one of them.
+- **The bill is an estimate, and says so.** It multiplies the tokens the session log
+  recorded by the published list price of the model the route named. It makes no
+  claim about what a provider invoices, which differs for failed, retried and
+  partially delivered requests, and it does not know about a plan's included quota
+  beyond what you tell it in the config.
+
+
+overview, `GET|POST /api/token-ledger/rates` for prices and the rate, and
+`GET /api/token-ledger/bill` for the bill. The overview polls once a minute, prices
+and the bill only while their tab is open. All three refuse a
 non-loopback peer, so they stay private even if the web server is bound to
 `0.0.0.0`. The write half additionally requires a JSON content type — a
 cross-origin form cannot send one — and caps the body at 256 KiB.
@@ -233,7 +283,7 @@ price.
 It needs a profile with a web server (the `web` or `desktop` profile). Without one,
 `/tokens` and the CLI still work, and the section says so instead of failing.
 
-Neither view is published through a settings namespace. That would need a schema —
+None of the three views is published through a settings namespace. That would need a schema —
 a real dependency, and this package has none — and would rewrite `settings.yaml` on
 every debounce with data that is derived and reproducible. The ledger file stays the
 only store of record; prices live in `rates.json` beside it.
@@ -256,6 +306,16 @@ Override the composition entry by its `id`:
     #   vendors: 15                      # default: cap on how many vendors to publish; 0 for all
     #   modelsUrl: 'https://…'           # default: per source — https://models.dev/api.json
     #   fxUrl: 'https://…/latest/USD'    # default: open.er-api.com
+    # Monthly plans, for the bill's plan grouping. Each is amortized over the days
+    # a bill covers, so a partial month is billed partially.
+    subscriptions:
+      - vendor: deepseek                 # which vendor's usage this plan covers
+        plan: 'DeepSeek 包月'            # the name shown on the bill
+        amount: 199                      # the fee per month
+        currency: CNY                    # the currency the fee is quoted in
+        startedAt: '2026-09-01'          # optional: not billed before this day
+        endedAt: null                    # optional: not billed after this day
+        note: null                       # optional: free text, shown with the plan
 ```
 
 `rates: false` disables the pricing feature's networking entirely and leaves
@@ -264,11 +324,12 @@ wants; the rates page still works.
 
 ## What it deliberately does not do
 
-- **No cost, in money.** It counts tokens, and it shows a price table with a live
-  rate beside it, but it never multiplies one by the other. A cost number would
-  have to combine per-model token counts with the price of the route actually
-  billed, and both are approximate in ways that make the result wrong in a
-  plausible-looking way. Do that arithmetic with your own billing data.
+- **No cost on the overview, and a stated-basis estimate on the bill.** The
+  overview counts tokens and stops there. The bill does multiply tokens by prices,
+  because that is what a bill is; it names the price source, the rate it converted
+  at, every join it made by name and every model it could not price, so the number
+  can be checked rather than believed. It is not a provider invoice and does not
+  claim to be one — see the Bill section above for what it leaves out.
 - **No bundled price list.** Prices are fetched from a source you can choose — the
   default is each vendor's own list price — or typed by you. A price list shipped
   inside the package would be wrong within weeks and would have to be updated by a

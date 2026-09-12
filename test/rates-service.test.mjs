@@ -213,6 +213,39 @@ test('clearing an override hands the row back to the fetched value', async () =>
   }
 })
 
+test('the two review answers hand a field back or record the price that was kept', async () => {
+  const { service, cleanup } = makeService()
+  const row = () => service.read().vendors.find((entry) => entry.vendor === 'acme').models.find((entry) => entry.id === 'acme/new-flash')
+  try {
+    await service.refresh()
+    // Typed against a published 0.2 in / 0.8 out, so both fields are a disagreement.
+    service.saveOverrides({ models: { 'acme/new-flash': { input: 0.42, output: 0.9 } } })
+    assert.deepEqual(service.read().pending.map((entry) => entry.fields.map((field) => field.key)), [['input', 'output']])
+
+    // "Keep mine" writes down the published number that was on screen, and only
+    // that one: the field that was never answered is still asked about.
+    const kept = service.saveOverrides({ keep: { 'acme/new-flash': ['input'] } })
+    assert.equal(kept.saved.kept, 1)
+    assert.deepEqual(service.read().pending.map((entry) => entry.fields.map((field) => field.key)), [['output']])
+    assert.equal(row().prices.input, 0.42, 'the typed price survives the answer')
+
+    // "Use official" deletes the typed values, which is what hands the fields
+    // back to the catalogue rather than freezing them at today's number.
+    const adopted = service.saveOverrides({ adopt: { 'acme/new-flash': ['input'] } })
+    assert.equal(adopted.saved.adopted, 1)
+    assert.equal(row().prices.input, 0.2, 'back to the published price')
+    assert.equal(row().prices.output, 0.9, 'and the field that was kept is still typed')
+    assert.equal(row().source, 'manual', 'one typed field left, so the row is still protected')
+
+    service.saveOverrides({ adopt: { 'acme/new-flash': ['output'] } })
+    assert.equal(service.read().overriddenModels, 0, 'with nothing typed left the override goes entirely')
+    assert.equal(row().source, 'fetched')
+    assert.deepEqual(service.read().pending, [])
+  } finally {
+    cleanup()
+  }
+})
+
 test('an invalid patch is refused and changes nothing', async () => {
   const { service, cleanup } = makeService()
   try {

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { UsageLedger, countersFromUsage, dateKeyOf, emptyCounters, inheritedCut, isForkSession } from '../lib/ledger.js'
+import { UsageLedger, countersFromUsage, cwdOf, dateKeyOf, emptyCounters, inheritedCut, isForkSession, isPeakTime } from '../lib/ledger.js'
 import {
   ALPHA_EVENTS,
   ALPHA_EXPECTED,
@@ -393,6 +393,156 @@ test('agrees with an independent naive recomputation over generated logs', () =>
     assert.equal(ledger.totals.totalTokens, naiveTotal, `round ${round} total`)
     assert.equal(ledger.calls, expectedByStep.size + (compactionTotal > 0 ? countCompactions(events) : 0), `round ${round} calls`)
   }
+})
+
+test('a session can be attributed to the directory it worked in', () => {
+  // A workspace bill groups by this, and it is on the session's own creation
+  // record rather than in anything the caller has to know about.
+  assert.equal(cwdOf([{ type: 'session/created', cwd: 'D:\\LLM\\knowledge-base' }]), 'D:\\LLM\\knowledge-base')
+  assert.equal(cwdOf([{ type: 'x', data: { cwd: 'C:\\work' } }]), 'C:\\work')
+  assert.equal(cwdOf([{ type: 'x', data: { header: { cwd: 'C:\\deep' } } }]), 'C:\\deep')
+  assert.equal(cwdOf([]), null)
+  assert.equal(cwdOf([{ type: 'x', cwd: '' }]), null)
+  assert.equal(cwdOf(undefined), null)
+
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({ sessionId: 's1', events: [{ type: 'session/created', cwd: 'D:\\proj' }, ...withSeq(ALPHA_EVENTS)] })
+  const session = ledger.snapshot().sessions.find((row) => row.sessionId === 's1')
+  assert.equal(session.cwd, 'D:\\proj')
+
+  // A live session carries it on its header, and a later observation never
+  // overwrites what was already known.
+  const live = new UsageLedger()
+  const session2 = fakeSession('s2', withSeq(ALPHA_EVENTS))
+  session2.header = { cwd: 'E:\\live' }
+  live.adoptSession(session2)
+  live.setWorkspace('s2', null)
+  assert.equal(live.snapshot().sessions.find((row) => row.sessionId === 's2').cwd, 'E:\\live')
+})
+
+test('the time-of-day window is the one the vendor prices by', () => {
+  // Beijing weekday 09:00-12:00 and 14:00-18:00: the window DeepSeek halves its
+  // price outside of. Read as UTC-shifted wall clock, so the machine's own zone
+  // cannot change the answer.
+  const at = (iso) => Date.parse(iso)
+  assert.equal(isPeakTime(at('2026-03-10T02:00:00Z')), true, 'Tuesday 10:00 Beijing')
+  assert.equal(isPeakTime(at('2026-03-10T03:59:00Z')), true, 'just before noon')
+  assert.equal(isPeakTime(at('2026-03-10T04:00:00Z')), false, 'noon sharp is off-peak')
+  assert.equal(isPeakTime(at('2026-03-10T06:00:00Z')), true, 'Tuesday 14:00 Beijing')
+  assert.equal(isPeakTime(at('2026-03-10T09:59:00Z')), true, 'just before 18:00')
+  assert.equal(isPeakTime(at('2026-03-10T10:00:00Z')), false, '18:00 sharp is off-peak')
+  assert.equal(isPeakTime(at('2026-03-10T00:00:00Z')), false, 'Tuesday 08:00 Beijing')
+  assert.equal(isPeakTime(at('2026-03-14T02:00:00Z')), false, 'Saturday is off-peak all day')
+  assert.equal(isPeakTime(at('2026-03-15T06:00:00Z')), false, 'Sunday too')
+  assert.equal(isPeakTime(0), false, 'no time is not peak')
+  assert.equal(isPeakTime(undefined), false)
+})
+
+test('usage is split by the window, per day, session and model', () => {
+  // The cross table a bill is computed from: two calls in the peak window and one
+  // outside it, on different days and models, with the four buckets kept apart.
+  const peak = '2026-03-10T02:00:00Z'
+  const off = '2026-03-10T20:00:00Z'
+  const events = [
+    { type: 'session/created', cwd: 'D:\\proj', seq: 0 },
+    { type: 'request/header', seq: 1, time: Date.parse(peak), data: { header: { config: { provider: 'acme', model: 'one' } } } },
+    {
+      type: 'assistant/message',
+      seq: 2,
+      time: Date.parse(peak),
+      data: { turn: 1, step: 1, usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 1000 } },
+    },
+    { type: 'request/header', seq: 3, time: Date.parse(off), data: { header: { config: { provider: 'acme', model: 'two' } } } },
+    {
+      type: 'assistant/message',
+      seq: 4,
+      time: Date.parse(off),
+      data: { turn: 1, step: 2, usage: { inputTokens: 200, outputTokens: 20, cacheReadTokens: 2000 } },
+    },
+  ]
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({ sessionId: 's1', events })
+
+  const rows = ledger.snapshot().usage
+  assert.equal(rows.length, 2, 'one row per day, session and model')
+  const peakRow = rows.find((row) => row.model === 'acme/one')
+  const offRow = rows.find((row) => row.model === 'acme/two')
+
+  assert.equal(peakRow.date, dateKeyOf(Date.parse(peak)))
+  assert.equal(peakRow.sessionId, 's1')
+  assert.equal(peakRow.peak.inputTokens, 100, 'the peak request lands in the peak side')
+  assert.equal(peakRow.peak.outputTokens, 10)
+  assert.equal(peakRow.peak.cacheReadTokens, 1000)
+  assert.equal(peakRow.peak.totalTokens, 1110)
+  assert.equal(peakRow.offPeak.totalTokens, 0, 'and nothing lands in the other side')
+  assert.deepEqual(offRow.peak.totalTokens, 0)
+  assert.equal(offRow.offPeak.totalTokens, 2220)
+  // The row's own total is the two sides added up, so a reader never has to.
+  assert.equal(offRow.totalTokens, 2220)
+  assert.equal(offRow.calls, 1)
+
+  // Adding the sides back together reproduces the flat tables, which is what makes
+  // the cross table worth having rather than a second source of truth.
+  const models = ledger.snapshot().models
+  const one = models.find((row) => row.model === 'acme/one')
+  assert.equal(one.totalTokens, peakRow.totalTokens)
+  assert.equal(ledger.totals.totalTokens, 1110 + 2220)
+})
+
+test('a replaced sample moves between the two sides of the window', () => {
+  // The same call reported twice: a streaming usage chunk at one time and the
+  // final message at another. The earlier value has to come out of the side it
+  // went into, or a bill is charged twice for half a call.
+  const first = Date.parse('2026-03-10T02:00:00Z')
+  const second = Date.parse('2026-03-10T20:00:00Z')
+  const events = [
+    { type: 'request/header', seq: 0, time: first, data: { header: { config: { provider: 'acme', model: 'one' } } } },
+    { type: 'assistant/chunk', seq: 1, time: first, data: { turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 100, outputTokens: 10 } } } },
+    {
+      type: 'assistant/message',
+      seq: 2,
+      time: second,
+      data: { turn: 1, step: 1, usage: { inputTokens: 150, outputTokens: 15 } },
+    },
+  ]
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({ sessionId: 's1', events })
+
+  const rows = ledger.snapshot().usage
+  assert.equal(ledger.calls, 1, 'one call, not two')
+  // The sample went into the peak side of the day it arrived on; the final message
+  // arrived after midnight, so it is a different row entirely — and the sample's
+  // peak share is gone rather than charged on top.
+  assert.equal(rows.reduce((sum, row) => sum + row.peak.totalTokens, 0), 0)
+  assert.equal(rows.reduce((sum, row) => sum + row.offPeak.totalTokens, 0), 165)
+  assert.equal(rows.reduce((sum, row) => sum + row.totalTokens, 0), 165, 'the final value, not the sample plus it')
+  assert.equal(rows.reduce((sum, row) => sum + row.calls, 0), 1)
+  assert.ok(rows.every((row) => row.calls > 0), 'a replaced-away row is not published as an empty line')
+})
+
+test('a snapshot round trip keeps the split and the working directory', () => {
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({ sessionId: 's1', events: [{ type: 'session-created', cwd: 'D:\\proj' }, ...withSeq(ALPHA_EVENTS)] })
+  const snapshot = JSON.parse(JSON.stringify(ledger.snapshot()))
+
+  const restored = new UsageLedger()
+  assert.equal(restored.restore(snapshot), true)
+  assert.deepEqual(restored.snapshot().usage, snapshot.usage, 'the cross table survives intact')
+  assert.equal(restored.snapshot().sessions.find((row) => row.sessionId === 's1').cwd, 'D:\\proj')
+  assert.equal(restored.totals.totalTokens, ledger.totals.totalTokens)
+})
+
+test('a ledger written before the cross table is refused, not half-read', () => {
+  // Version 4 exists for exactly this: those files have no time-of-day split and
+  // their cursors would stop the affected sessions from ever acquiring one.
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({ sessionId: 's1', events: withSeq(ALPHA_EVENTS) })
+  const snapshot = JSON.parse(JSON.stringify(ledger.snapshot()))
+  snapshot.version = 3
+  const restored = new UsageLedger()
+  assert.equal(restored.restore(snapshot), false)
+  assert.equal(restored.totals.totalTokens, 0, 'and leaves an empty ledger behind, not a partial one')
+  assert.deepEqual(restored.snapshot().usage, [])
 })
 
 /**
