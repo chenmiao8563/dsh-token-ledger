@@ -773,13 +773,15 @@ test('every vendor gets a mark, and it is the vendor’s own', () => {
   const { tree, text } = renderRates(module, { status: 'ready', data: curated, error: null })
   const marks = findAllByClass(tree, 'tl-logo')
   assert.equal(marks.length, 1)
-  // The mark is the vendor's own geometry, drawn inline so it needs no network.
-  const svg = marks[0].children.find((child) => child.type === 'svg')
-  assert.ok(svg !== undefined, 'a bundled vendor draws an SVG mark')
-  assert.equal(svg.props.viewBox, '0 0 24 24')
-  assert.equal(svg.children.length, 1, 'DeepSeek is a single path — the whale')
-  assert.equal(svg.children[0].props.fill, '#5786FE', 'in the brand colour the vendor publishes')
-  assert.ok(svg.children[0].props.d.length > 1000, 'and it is the real outline, not a letter')
+  // The mark is the vendor's own document, injected whole rather than rebuilt from
+  // its paths — keeping only the geometry is exactly what made three marks render
+  // wrong (a dropped `<g transform>`, dropped CSS classes, dropped clip paths).
+  const injected = marks[0].props.dangerouslySetInnerHTML?.__html ?? ''
+  assert.ok(injected.startsWith('<svg '), 'the mark is an SVG document')
+  assert.match(injected, /viewBox="0 0 24 24"/)
+  assert.match(injected, /fill="#5786FE"/, 'DeepSeek keeps the brand colour the vendor publishes')
+  assert.ok(injected.length > 1000, 'and the real outline, not a letter')
+  assert.ok(!injected.includes('<script'), 'a bundled asset, but not one that can run anything')
   // The name is the vendor's own spelling, not the source key.
   assert.ok(hasText(text, 'DeepSeek'), 'the display name is capitalised the way the vendor writes it')
   assert.ok(!hasText(text, 'deepseek ('))
@@ -792,6 +794,74 @@ test('every vendor gets a mark, and it is the vendor’s own', () => {
   assert.deepEqual(collectText(all[0]), ['AC'], 'an unknown vendor falls back to its letters')
   assert.match(all[0].props.style.background, /^#[0-9a-f]{6}$/)
   assert.deepEqual(collectText(all[1]), ['··'], 'the hand-entered group carries no brand')
+})
+
+test('every bundled mark is the vendor’s own document and survives intact', () => {
+  // The regression this exists for: keeping only `<path d>` rendered three marks
+  // wrong — Tencent's sits inside a flipped `<g transform>`, Z.ai's fills live in
+  // CSS classes, OpenAI's uses a clip path over a background rect. So the checks
+  // are structural: whatever a vendor's own file needs to draw itself has to still
+  // be there, and the markup has to stay well formed after sanitizing.
+  const vendors = ['openai', 'anthropic', 'google', 'deepseek', 'qwen', 'x-ai', 'z-ai', 'kimi', 'minimax', 'tencent', 'xiaomi', 'bytedance']
+  const payload = ratesPayload({
+    vendors: vendors.map((vendor) => ({
+      vendor,
+      modelCount: 1,
+      models: [
+        {
+          id: `${vendor}/one`,
+          name: `${vendor} one`,
+          vendor,
+          created: null,
+          contextLength: null,
+          prices: { input: 1, output: 2, cacheRead: null, cacheWrite: null },
+          source: 'fetched',
+        },
+      ],
+    })),
+  })
+  const { module } = loadWithSection()
+  const tree = renderRatesView(module, { status: 'ready', data: payload, error: null }, [], {})
+  const marks = findAllByClass(tree, 'tl-logo').filter((element) => element.props.className === 'tl-logo')
+  assert.equal(marks.length, vendors.length, 'one mark per vendor')
+
+  const markup = new Map(vendors.map((vendor, index) => [vendor, marks[index].props.dangerouslySetInnerHTML?.__html ?? '']))
+  for (const [vendor, svg] of markup) {
+    assert.ok(svg.startsWith('<svg '), `${vendor}: is an SVG document`)
+    assert.match(svg, /viewBox="[^"]+"/, `${vendor}: has a viewBox so it scales to its tile`)
+    // The root must not pin a size: the tile decides it. (A `<rect width>` deeper
+    // in the document is geometry, not a size.)
+    const rootTag = /^<svg[^>]*>/.exec(svg)[0]
+    assert.ok(
+      !/\swidth="\d+(\.\d+)?(pt|px)?"/.test(rootTag) && !/\sheight="\d+(\.\d+)?(pt|px)?"/.test(rootTag),
+      `${vendor}: the root has no absolute size`,
+    )
+    assert.ok(!svg.includes('<style'), `${vendor}: no stylesheet that would leak into the page`)
+    assert.ok(!svg.includes('<script') && !/\son[a-z]+=/i.test(svg), `${vendor}: nothing executable`)
+
+    // Well-formedness, roughly: every element that is not self-closed is closed.
+    const opened = [...svg.matchAll(/<([a-zA-Z][\w:-]*)(?:\s[^>]*?)?(\/?)>/g)]
+    const stack = []
+    for (const [, name, selfClosed] of opened) {
+      if (selfClosed === '/') continue
+      if (name === 'svg') stack.push(name)
+    }
+    const closes = [...svg.matchAll(/<\/([a-zA-Z][\w:-]*)>/g)].map((match) => match[1])
+    for (const name of [...opened].map((match) => match[1])) {
+      if (['path', 'rect', 'circle', 'polygon', 'polyline', 'line', 'use', 'stop', 'image'].includes(name)) continue
+      const openCount = [...svg.matchAll(new RegExp(`<${name}(?:\\s|>)`, 'g'))].length
+      const closeCount = closes.filter((closed) => closed === name).length
+      assert.equal(openCount, closeCount, `${vendor}: <${name}> tags balance`)
+    }
+  }
+
+  // The three that were wrong, checked for the specific thing each one needed.
+  assert.match(markup.get('tencent'), /transform="[^"]*scale\(/, 'Tencent keeps its flipped group transform')
+  assert.match(markup.get('z-ai'), /class="|clip-path="|stroke="/, 'Z.ai keeps the attributes its fills depend on')
+  assert.match(markup.get('openai'), /<clipPath/, 'OpenAI keeps its clip paths')
+  assert.match(markup.get('openai'), /<rect[^>]*rx=/, 'and the background it draws the knot on')
+  assert.ok(!markup.get('tencent').includes('fill="#ffffff"'), 'Tencent is not left white-on-white')
+  assert.match(markup.get('deepseek'), /fill="#5786FE"/, 'DeepSeek keeps its blue')
 })
 
 test('a vendor priced from its own page says so, and a dataset vendor does not', () => {

@@ -140,6 +140,29 @@ Four things only a person reading the rendered table could have asked for:
   used to identify whose price is being shown. A vendor with no bundled mark still
   gets its letters.
 
+### Fixed
+
+- **Three vendor marks rendered wrong, and the cause was this package's own
+  extraction.** The client kept each mark's `<path d>` plus a colour, which silently
+  discarded everything else a mark can need. Tencent's sits inside a flipped
+  `<g transform="translate(0,848) scale(0.1,-0.1)">`, so it came out mirrored and
+  displaced; Z.ai's file paints every path through a CSS class (`.st0` … `.st194`)
+  and a gradient, so three meaninglessly painted fragments appeared instead of the
+  logo; OpenAI's mark is a `<path>` inside a `<clipPath>` over a background
+  `<rect>`, so the whole thing was dropped. On top of that, Tencent's file is a
+  Safari *mask* icon — a white shape on transparent, meant to be recoloured by the
+  consumer — and white on a white tile is invisible, which is exactly how it looked.
+  Each mark is now bundled as the vendor's own sanitized SVG document and injected
+  whole, so whatever a file needs to draw itself survives. The sanitizer does four
+  things and nothing else: it strips the root's fixed size, resolves OpenAI's
+  `:root` variable swap into concrete colours (a plugin has no business setting CSS
+  variables on the host page), prefixes ids so two inline SVGs cannot collide, and
+  drops scripts and `on*` attributes. Every bundled mark is then diffed against the
+  vendor's original file — same elements in the same order, same path geometry,
+  same transforms, fill-rules and classes — so only those four changes can differ.
+  `docs/logo-preview.html` shows all twelve at the page's real 18px and enlarged,
+  on a light and a dark band.
+
 ### Notes
 
 - Prices are stored as **USD per one million tokens** unless the vendor publishes
