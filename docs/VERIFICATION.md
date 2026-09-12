@@ -447,6 +447,56 @@ reports `failed (…)`, and the manual entry group is published rather than
 discarded. The isolated two-mount test in `test/plugin.test.mjs` pins the same
 story on the second host with no network at all.
 
+## Live host mount, 0.4.0 — the real DSH web server
+
+The gap the previous section left open ("a real `node:http` server, not the DSH
+web server") is now closed. 0.4.0 was mounted in a real DSH host with its own web
+server, on an isolated home, on a port of its own:
+
+```powershell
+$env:ELECTRON_RUN_AS_NODE = '1'
+$env:DSH_HOME = '<tmp>\host-check\home'
+& '<install>\DSH Desktop.exe' --expose-internals '<install>\resources\app.asar\lib\desktop-cli.js' `
+    plugin --profile web add <repo path>
+& '<install>\DSH Desktop.exe' --expose-internals '<install>\resources\app.asar\lib\desktop-cli.js' `
+    --profile web --no-open --port 43977
+```
+
+Installing printed `+ @chenmiao8563/dsh-token-ledger link:<repo path>`, and the
+profile it composed was `@deepseek-ai/dsh-base`, `@deepseek-ai/dsh-web-app` and
+this package. Both routes then answered **through DSH's own web server**:
+
+```
+GET /api/token-ledger/summary -> 200, 1350 bytes, plugin "token-ledger"
+GET /api/token-ledger/rates   -> 200, 30558 bytes
+  catalogue: available, 123 rows / 56 vendors of 445
+  fx: 6.725314 USD -> CNY
+  refreshIntervalMs: 1800000
+  first row: openai / openai/gpt-6-astra
+POST /api/token-ledger/rates  -> 200, {"models":1,"fx":true}
+  row source: manual, input: 1.25, output stayed: 50   (only the typed price moved)
+  fx: 7.01 overridden=true
+GET  /api/token-ledger/rates  (Origin: https://evil.example) -> 403
+```
+
+The host wrote both state files into the isolated home — `token-ledger/ledger.json`
+(295 bytes) and `token-ledger/rates.json` (53,777 bytes) — which is what proves the
+pricing refresh actually ran inside the host rather than only under test.
+
+**The browser half is served too.** Reading the boot manifest out of the settings
+page gave the entry's bundle path, and the host served it:
+
+```
+GET /plugins/??@chenmiao8563/dsh-token-ledger/client.js&rev=…  -> 200, 72106 bytes
+  contains tabRates, ratesTitle, api/token-ledger/rates, manualFormTitle, __ModuleLoader__
+```
+
+So the artifact the browser loads is the 0.4.0 client half. What is *not* covered
+is the same thing as before: nobody has looked at the rendered page.
+
+The isolated host was then stopped by port, and the machine's real DSH instance
+(a different process, on its own port) was confirmed still listening.
+
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not
@@ -461,15 +511,10 @@ useful:
   records. It makes no claim about what a provider invoices, which can differ
   for failed, retried or partially delivered requests.
 - **The rates view in a real browser.** Both views are asserted under the real
-  React and their markup is checked, but no one has yet looked at the Rates tab in
-  a running DSH — the 0.4.0 layout, spacing and colour are verified by assertion
-  only. The 0.3.0 round of feedback came from looking at the page; this one has
-  not had that pass.
-- **The DSH web server itself.** Both routes were driven through a real
-  `node:http` server, which exercises the handlers, the guard against a real
-  `remoteAddress`, JSON serialization and the write path — but it is not DSH's own
-  web server, and its routing rules are taken from the 0.2.0 mount rather than
-  re-checked here.
+  React, their markup is checked, and the bundle the browser receives was fetched
+  from a running host — but no one has yet looked at the Rates tab on screen. The
+  0.3.0 round of feedback came from looking at the page; this one has not had that
+  pass.
 - **Price accuracy.** The tables are asserted to carry what the source published,
   spot-checked against one vendor's published numbers. Nothing here verifies that
   a source is correct, current, or the price a given account is actually billed.
