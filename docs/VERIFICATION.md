@@ -7,7 +7,7 @@ point of this file is to be checkable and to state its own gaps.
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-09-12 (0.6.0 and 0.5.0; the 0.4.0 runs below were on 2026-09-10) |
+| Date | 2026-09-12 (0.7.0, 0.6.0 and 0.5.0; the 0.4.0 runs below were on 2026-09-10) |
 | OS | Windows (win32) |
 | Node.js | v24.18.0 |
 | DSH | 0.1.2-rc.1 (packaged desktop build) |
@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm run test:single-process` — **271 tests in 13 files, all passing**, with no
+`npm run test:single-process` — **282 tests in 14 files, all passing**, with no
 dependencies to install and no network. (That is the same suite as `npm test`;
 the per-file process isolation Node uses by default cannot `spawn` on this
 machine, so the isolation-free runner is the one used here.) The
@@ -27,16 +27,17 @@ reach the real one:
 | --- | --- | --- |
 | `test/ledger.test.mjs` | 28 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, the peak/off-peak split and the usage cross table, workspace capture, the session title DSH gives a session (last one wins, blank and non-string titles ignored, survives a restart), and a property-style cross-check against an independent naive implementation over 25 generated logs |
 | `test/cli.test.mjs` | 13 | rebuild/audit/rebuild-write/export over synthetic homes, pending-vs-stale classification, tamper detection, exit codes, torn logs |
-| `test/plugin.test.mjs` | 20 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, `/tokens` variants, degraded services, config overrides, all three routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
+| `test/plugin.test.mjs` | 21 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, the working directory read from the session header rather than from the sequenced events, `/tokens` variants, degraded services, config overrides, all three routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
 | `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
-| `test/bill.test.mjs` | 22 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by vendor/model/workspace/session with a session labelled `workspace/title` and a model labelled `vendor/model`, each range including `today` and "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers, a plan allocated across rows so that every grouping's rows sum to its own total, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, and the CSV |
+| `test/bill.test.mjs` | 24 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by vendor/model/workspace/session with a session labelled `workspace/title` and a model labelled `vendor/model`, each range including `today` and "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers, a plan allocated across rows so that every grouping's rows sum to its own total, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, and the CSV |
 | `test/route.test.mjs` | 40 | all three routes: the loopback and origin guard, unsupported methods, the bill's grouping and range lists with their fallbacks (one section per request, twenty for an export), the CSV download and its filename, the overview's per-period costs and its degradation when there are no prices, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 paths |
 | `test/rates.test.mjs` | 27 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, the adopt/keep decision, and the input validator |
 | `test/rates-service.test.mjs` | 13 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
 | `test/client.test.mjs` | 54 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, all three views' rendering logic, the overview's estimated cost per range and per day (including the no-prices dash), the bill's four stacked sections with a period each, its export links and its per-section failure, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that each view reads its route only when it is opened |
 | `test/vendor-prices.test.mjs` | 9 | the vendor pricing-page adapters: the HTML helpers, a price written as `0.15元` and as `输入：0.5元`, DeepSeek's merged label cells and both time-of-day columns, Z.ai's storage column that sometimes says "Limited-time Free", Tencent's label-embedded prices, and a row per period |
-| `test/client-render.test.mjs` | 20 | the same views under the real React, asserting the actual markup, the bill's four cards, twenty period tabs, export URLs and money columns, and that the library raises no complaint |
+| `test/client-render.test.mjs` | 21 | the same views under the real React, asserting the actual markup, the bill's four cards, twenty period tabs, export URLs and money columns, and that the library raises no complaint |
+| `test/providers.test.mjs` | 7 | the provider display names: the `providers:` block read out of a plugin-scoped settings file, quotes and comments and `~`-escaped names, several blocks merged, a name never guessed from a model list, a missing or unreadable file degrading to the provider id, and the cache window that keeps a poll from re-reading the file |
 | `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
 
 The React-dependent files skip with a stated reason when `react` and `react-dom`
@@ -765,6 +766,100 @@ The browser half served by that host was read back too: the 3.87 MB bundle
 contains `BillSection`, `BILL_SECTION_ORDER`, `rangeToday`, `billExportAllCsv`,
 `billPlanShare` and `estCost`.
 
+## The reported defects, 0.7.0 — read against a real ledger
+
+Four problems were reported against the 0.6.0 page while looking at a real bill. All
+four were reproduced first and then fixed; the evidence for each is below.
+
+### The workspace grouping collapsed to `(unknown)`
+
+The live ledger on this machine recorded **1 of 75** sessions with a working
+directory, so the workspace section had one `(unknown)` row and one real one. The
+cause was not in the bill: DSH's `sessionPersistence` returns the *sequenced* events
+plus the session header separately, and the header line — the one carrying `cwd` — is
+not in the events array. Reading the events alone found no `cwd`, while a CLI
+`rebuild` of the same logs found every one, because the CLI decodes the raw file
+where the header *is* the first record.
+
+The storage implementation was read out of the packaged app to confirm the shapes
+(`dsh-session-persistence-jsonl`): `list()` parses the header line and returns it as
+`header`, and `toHeaderLine`/`fromHeaderLine` show `cwd` on it. The host now passes
+that header's `cwd` into the fold, trying `stored.meta`, the list header,
+`stored.session` and the object itself, and keeps the event scan as a fallback.
+
+Verified by folding this machine's real logs **through a real DSH host** (an isolated
+home holding a copy of the 140 session logs, its own port, its own web server):
+
+```
+sessions 140, usage rows 148, tokens 2,011,822,094, calls 9,028
+sessions with cwd     140 / 140      (was 1 / 75 on the live ledger)
+sessions with title    58 / 140
+D:\LLM\knowledge-base 56 · E:\bosc_project\LLM-Wiki知识包模版 17 · E:\bosc_project\torchv-master 14 · …
+```
+
+### The model column merged two endpoints into one row
+
+Grouped by the price list's name, `deepseek-official/deepseek-v4-flash` and
+`bos/deepseek-v4-flash` both displayed as `deepseek/DeepSeek-V4.1-Flash` — three rows
+where there are five. The model dimension now keys on the route the ledger recorded,
+and the same real-data run shows one row per endpoint, each still billed at DeepSeek's
+list price:
+
+```
+model / month
+  qwen-plan/qwen3.8-flash               provider qwen-plan          priceVendor qwen      ¥59.31
+  deepseek-official/deepseek-v4-flash   provider deepseek-official  priceVendor deepseek  ¥49.69
+  bos/deepseek-v4-flash                 provider bos                priceVendor deepseek  ¥49.20
+  zai/glm-5.3-flash                     provider zai                priceVendor z-ai      ¥26.20
+  qwen-plan/qwen3.8-max                 provider qwen-plan          priceVendor qwen       ¥4.68
+```
+
+### The vendor section was grouped by price list, not by provider
+
+The same run, grouped by the provider the request named, with the display name read
+from the harness settings file (`settings.yaml` → `llm-pi-ai.providers.bos.displayName`):
+
+```
+vendor / month
+  qwen-plan          provider qwen-plan          priceVendor qwen      ¥63.98
+  deepseek-official  provider deepseek-official  priceVendor deepseek  ¥49.69
+  BOS-API            provider bos                priceVendor deepseek  ¥49.20
+  zai                provider zai                priceVendor z-ai      ¥26.20
+  TOTAL                                                               ¥189.08
+```
+
+`BOS-API` is the name the model settings page shows for the `bos` endpoint; it is read
+from that file (never written), and the price source is stated beside it. Every
+grouping's rows summed exactly to its own total (189.08) in the same run, workspaces
+included, and the page's four sections were all served from one host:
+
+```
+workspace 8 rows · session 50 rows · model 5 rows · vendor 4 rows, all TOTAL 189.08
+GET /api/token-ledger/bill?by=…&range=month,year,week,today,all&format=csv
+  -> 200, 36,701 bytes, 333 lines, 20 section totals, attachment "token-bill-all-2026-09-12.csv"
+```
+
+### The composition key named a bucket that was never drawn
+
+The 按模型 key printed the raw string `cacheWriteTokens`, untranslated, for a bucket no
+bar contained — DeepSeek publishes no cache-write price, so nothing ever wrote cache.
+The bucket is now translated, and a bucket with no tokens anywhere in the payload is
+left out of the bars and the key. Asserted both ways in the render tests: three keys
+when nothing wrote cache, four (with the fourth named and coloured) when the payload
+has cache-write tokens.
+
+### What could not be verified locally, and why
+
+The host path was verified against **a copy** of this machine's session logs in a
+disposable home, not against the live home: two DSH processes folding one ledger would
+race on the same file, and the running instance belongs to its user. A hand-built
+synthetic home was tried first and abandoned — the storage asserts that a log's path is
+`projectKey(cwd)/encodeSegment(id)/session.jsonl.zstd`, and while that encoding can be
+replicated (it was, and the fixture then folded correctly through the CLI), copying
+real logs proved both cheaper and stronger. A side finding from that attempt: a boot
+that fails to bind its port prints nothing at all, which cost some time; a port that a
+previous host still holds looks exactly like a plugin that failed to load.
+
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not
@@ -795,6 +890,14 @@ useful:
   the ledger does not know a provider's actual plan terms (quotas, per-model
   exclusions), so the allocation is a stated convention, not the provider's own
   accounting.
+- **A provider's display name on another machine.** The names are read from
+  `settings.yaml` by a scanner that knows one shape (a `providers:` block at any
+  depth, entries under it, `displayName` on an entry). A harness version that writes
+  its provider list elsewhere falls back to the provider id, which is truthful but
+  not the name the settings page shows.
+- **The workspace grouping when a session genuinely has no `cwd`.** A session whose
+  header carries no working directory is grouped as `(unknown)`; that is the honest
+  answer for it, and it is the one row that no fix can attribute.
 - **The vendor marks as pixels.** Twelve bundled marks are checked structurally:
   each is diffed against the vendor's original file — same element sequence, same
   path geometry, same transforms, fill-rules, clip paths and classes — so a dropped

@@ -158,9 +158,10 @@ three tabs: **Overview**, **Rates** and **Bill**.
 
 ### Overview
 
-- **Range totals** for this month, this year and the last 7 days — total tokens,
-  cache hit rate, call count, **预计花费 (estimated cost)** and the bucket breakdown
-  behind them. The cache hit rate is `cacheRead / (cacheRead + uncachedInput)`: the
+- **Range totals** for this month, this year, the last 7 days and **all of it** —
+  total tokens, cache hit rate, call count, **预计花费 (estimated cost)** and the
+  bucket breakdown behind them. *All* is every day the ledger holds, starting at its
+  first day. The cache hit rate is `cacheRead / (cacheRead + uncachedInput)`: the
   share of input the prompt cache absorbed, so a route with no caching reads 0%
   rather than undefined.
 - **The estimated cost is the bill's own arithmetic**, computed on the host for each
@@ -178,7 +179,9 @@ three tabs: **Overview**, **Rates** and **Bill**.
   busiest day, the lightest weekday and the weekday that ran latest (compared by
   the clock time of the day's last call).
 - **Per model** totals, each with its own hit rate and a stacked bar showing where
-  the tokens went.
+  the tokens went, with a key naming each bucket that appears. A bucket with no tokens
+  anywhere — cache writes, on vendors that publish no cache-write price — is left out
+  of the bar and the key rather than being a colour nobody can find in a bar.
 
 ### Rates
 
@@ -246,17 +249,24 @@ workspace, session, model, vendor — rather than put behind a tab, because the
 question a bill answers is usually comparative, and **each section carries its own
 period**, so this month by workspace can sit above today by model.
 
-- **What each row shows**: the group, the call count, **cache-read input**
-  (缓存命中输入), **input that missed the cache** (未命中输入), output, the cache hit
-  rate and **the cost** (实际花费). The two input columns are separate because they
-  are priced differently on every vendor that prices them at all. Cache-write input
-  is stated under each table rather than as a column that would be a dash nearly
-  everywhere.
+- **What each row shows**: the group, **the cost** (实际花费), cache-read input
+  (缓存命中输入), the input that missed the cache (未命中输入), output, the cache hit
+  rate, and the call count. The two input columns are separate because they are priced
+  differently on every vendor that prices them at all; cache-write input is stated
+  under each table rather than as a column that would be a dash nearly everywhere.
 - **Names that mean something**: a workspace row is the `cwd` the ledger recorded for
   the sessions that ran there; a session row reads `workspace/session-name`, using the
   title DSH itself gave the session (falling back to the session id for sessions DSH
   never titled, with the full id and path in the tooltip); a model row reads
-  `vendor/model`, so it says whose price was applied.
+  `provider/model` — the route the ledger recorded, the same name the overview's model
+  list shows — with the price row it was billed at in the tooltip.
+- **A vendor row is a provider you connected, not a price list.** `bos`, `qwen-plan`,
+  `deepseek-official` and `zai` are endpoints; `deepseek`, `qwen` and `z-ai` are whose
+  list prices their tokens carry. The row shows the provider — under the display name
+  the model settings page gives it, so `BOS-API` rather than `bos`, read from the
+  harness settings file and never written to it — and states the price source
+  underneath (`计价来源 deepseek`). Two endpoints serving the same model are therefore
+  two rows, which is the question a vendor bill exists to answer.
 - **Five periods per section**: this month, this year, the last 7 days, today, or
   everything, using the same trailing-window definitions as the overview.
 - **One export for all of it, top right.** CSV or JSON, carrying every grouping over
@@ -272,7 +282,8 @@ period**, so this month by workspace can sit above today by model.
   *allocated* across those rows in proportion to the usage it covers, which is what
   makes a section's rows add up to its total. A row billed partly by plan says so
   (`其中套餐摊分`), and a plan whose vendor has no usage in the period is still billed,
-  because it was still paid for.
+  because it was still paid for. A plan's `vendor` may name either the provider or the
+  price vendor (`bos` or `deepseek`); both resolve to the usage the plan covers.
 - **What it could not price is listed, not charged at zero**: each unpriced model
   with its tokens, calls and the reason — no price for that model, an ambiguous name
   that two vendors both publish, or a price in a currency the bill cannot convert.

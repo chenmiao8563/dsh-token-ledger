@@ -183,9 +183,9 @@ test('the range metrics render with the selected range applied', { skip }, () =>
   const year = renderView(exports, { state: ready, range: 'year' })
   assert.ok(year.html.includes('5,500'))
 
-  // The three requested periods are offered as tabs, with the active one marked.
-  for (const key of ['rangeMonth', 'rangeYear', 'rangeWeek']) assert.ok(month.html.includes(key), key)
-  assert.equal(countClass(month.html, 'tl-tab'), 6, 'three range tabs and three calendar tabs')
+  // The four periods are offered as tabs, with the active one marked.
+  for (const key of ['rangeMonth', 'rangeYear', 'rangeWeek', 'rangeAll']) assert.ok(month.html.includes(key), key)
+  assert.equal(countClass(month.html, 'tl-tab'), 7, 'four range tabs and three calendar tabs')
   assert.ok(month.html.includes('data-active="true"'), 'the active tab is marked')
 })
 
@@ -304,19 +304,39 @@ test('the model rows show where the tokens went, with a key', { skip }, () => {
 
   assert.ok(html.includes('deepseek-official/deepseek-v4-flash'))
   assert.equal(countByClass(html, 'tl-meter'), 1, 'one composition bar per model')
-  // The fixture model has cache reads, uncached input and output; the empty
-  // cache-write bucket is filtered out rather than drawn at zero width.
+  // The fixture model has cache reads, uncached input and output, and no cache
+  // writes at all — so the cache-write bucket is drawn nowhere *and* named nowhere.
+  // A colour in the key that appears in no bar is a puzzle, not a fact.
   assert.equal(countByClass(html, 'tl-seg'), 3)
   assert.ok(html.includes('background:#7fb2ff'), 'cache reads have their own colour')
   assert.ok(html.includes('background:#2f6fd0'), 'uncached input has its own colour')
   assert.ok(html.includes('background:#2fa86a'), 'output has its own colour')
-  // Every bucket is named once in the key, whatever the bars happen to contain.
-  // `tl-keys` is the container, so the count is of the exact item class.
-  assert.equal(countClass(html, 'tl-key'), 4)
-  assert.equal(countClass(html, 'tl-swatch'), 4)
-  for (const key of ['cacheReadTokens', 'inputTokens', 'outputTokens', 'cacheWriteTokens']) {
+  assert.equal(countClass(html, 'tl-key'), 3, 'one key per bucket that is actually drawn')
+  assert.equal(countClass(html, 'tl-swatch'), 3)
+  // The keys are translated, not printed as raw bucket names.
+  for (const key of ['cacheReadTokens', 'inputTokens', 'outputTokens']) {
     assert.ok(html.includes(key), `${key} is named in the key`)
   }
+  assert.ok(!html.includes('cacheWriteTokens'), 'a bucket with no tokens anywhere is left out entirely')
+})
+
+test('a cache-write bucket with tokens in it is drawn and named', { skip }, () => {
+  const exports = loadClient()
+  const payload = ready.data
+  const withWrite = {
+    ...ready,
+    data: {
+      ...payload,
+      totals: { ...payload.totals, cacheWriteTokens: 1_000 },
+      models: payload.models.map((model) => ({ ...model, cacheWriteTokens: 1_000 })),
+    },
+  }
+  const { html, complaints } = renderView(exports, { state: withWrite })
+  assert.deepEqual(complaints, [])
+  assert.equal(countByClass(html, 'tl-seg'), 4, 'four buckets when the fourth has tokens')
+  assert.equal(countClass(html, 'tl-key'), 4)
+  assert.ok(html.includes('cacheWriteTokens'), 'and it is named in the key')
+  assert.ok(html.includes('background:#9a6bd6'), 'with its own colour')
 })
 
 test('a model with no usage renders an empty meter rather than a broken stack', { skip }, () => {

@@ -176,8 +176,8 @@ test('the bill groups, converts and totals', () => {
 
   assert.equal(bill.currency, 'CNY')
   // DeepSeek is published in yuan and is not converted; OpenAI is in dollars and is.
-  const deepseek = bill.rows.find((row) => row.label === 'deepseek')
-  const openai = bill.rows.find((row) => row.label === 'openai')
+  const deepseek = bill.rows.find((row) => row.label === 'deepseek-official')
+  const openai = bill.rows.find((row) => row.label === 'openai-official')
   closeTo(deepseek.cost, 4.2, 'yuan-priced usage')
   closeTo(openai.cost, 70, 'dollars converted at the rate')
   assert.equal(openai.calls, 1)
@@ -228,8 +228,11 @@ test('a bill groups by workspace, session and model as well', () => {
 
   // A model row names its vendor as well as the model.
   const byModel = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'model', range: 'month', now: SEPTEMBER })
-  assert.deepEqual(byModel.rows.map((row) => row.label).sort(), ['deepseek/DeepSeek-V4.1-Flash', 'openai/GPT-6 Astra'], 'whose model it is, then which model')
-  closeTo(byModel.rows.find((row) => row.label === 'deepseek/DeepSeek-V4.1-Flash').cost, 4.2)
+  assert.deepEqual(byModel.rows.map((row) => row.label).sort(), ['deepseek-official/deepseek-v4-flash', 'openai-official/gpt-6-astra'], 'the route the ledger recorded, provider and model')
+  closeTo(byModel.rows.find((row) => row.label === 'deepseek-official/deepseek-v4-flash').cost, 4.2)
+  // The price row it was billed at travels with the row rather than replacing its name.
+  assert.equal(byModel.rows.find((row) => row.label === 'deepseek-official/deepseek-v4-flash').priceVendor, 'deepseek')
+  assert.deepEqual(byModel.rows.find((row) => row.label === 'deepseek-official/deepseek-v4-flash').priceNames, ['DeepSeek-V4.1-Flash'])
 })
 
 test('only the requested period is billed', () => {
@@ -317,7 +320,7 @@ test('the CSV carries the bill, with the currency on every row and a total per s
   assert.ok(lines.at(-1).startsWith('vendor,month,TOTAL,'))
 
   // Rows are ordered by cost, so the dollar-priced vendor comes first.
-  const deepseek = lines.find((line) => line.includes(',deepseek,'))
+  const deepseek = lines.find((line) => line.includes(',deepseek-official,'))
   assert.equal(deepseek.split(',')[11], 'usage')
   // The two input columns are the halves a bill is read by: cache reads first, then
   // the input that missed the cache — one million tokens on each side of the window.
@@ -373,8 +376,8 @@ test('a plan replaces the usage it covers, on every row that spans it', () => {
   assert.equal(other.covered, false)
 
   const byVendor = buildBill({ snapshot: snapshot(), catalogue: catalogue(), subscriptions: plans, by: 'vendor', range: 'month', now: SEPTEMBER })
-  closeTo(byVendor.rows.find((row) => row.label === 'openai').cost, 140, 'a plan vendor is billed its plan')
-  closeTo(byVendor.rows.find((row) => row.label === 'deepseek').cost, 4.2, 'and the rest is billed its usage')
+  closeTo(byVendor.rows.find((row) => row.label === 'openai-official').cost, 140, 'a plan vendor is billed its plan')
+  closeTo(byVendor.rows.find((row) => row.label === 'deepseek-official').cost, 4.2, 'and the rest is billed its usage')
   closeTo(byVendor.totals.cost, 144.2)
   closeTo(byVendor.totals.usageCost, 74.2, 'what the month would have cost without the plan')
 
@@ -411,7 +414,7 @@ test('a plan is allocated across rows, so the rows add up to the total', () => {
 
   // The vendor grouping has one row per vendor, so it carries the whole plan.
   const byVendor = buildBill({ snapshot: twoSessions, catalogue: catalogue(), subscriptions: plans, by: 'vendor', range: 'month', now: SEPTEMBER })
-  closeTo(byVendor.rows.find((row) => row.label === 'openai').cost, 140)
+  closeTo(byVendor.rows.find((row) => row.label === 'openai-official').cost, 140)
 })
 
 test('every grouping totals to the same bill, row by row', () => {
@@ -430,6 +433,60 @@ test('every grouping totals to the same bill, row by row', () => {
   for (const section of payload.sections) {
     closeTo(section.rows.reduce((sum, row) => sum + row.cost, 0), section.totals.totalCost, `${section.by} rows sum to its total`)
   }
+})
+
+test('a vendor row is the provider the request named, under the name the model settings show', () => {
+  // Two endpoints serving the same DeepSeek model: a bill that merged them by price
+  // vendor could not answer "what is BOS-API costing me", which is the question a
+  // provider row exists for.
+  const twoProviders = snapshot({
+    sessions: [{ sessionId: 's1', cwd: 'D:\\proj', title: '甲', calls: 2 }],
+    usage: [
+      usage('2026-09-11', 's1', 'deepseek-official/deepseek-v4-flash', counters(1_000_000, 0, 0), counters(0, 0, 0)),
+      usage('2026-09-11', 's1', 'bos/deepseek-v4-flash', counters(500_000, 0, 0), counters(0, 0, 0)),
+    ],
+  })
+  const plain = buildBill({ snapshot: twoProviders, catalogue: catalogue(), by: 'vendor', range: 'month', now: SEPTEMBER })
+  assert.deepEqual(plain.rows.map((row) => row.label).sort(), ['bos', 'deepseek-official'], 'the provider id when no display name is known')
+  // Both are priced from DeepSeek's list, which is what the tooltip says.
+  assert.ok(plain.rows.every((row) => row.priceVendor === 'deepseek'))
+  assert.equal(plain.rows.find((row) => row.label === 'bos').provider, 'bos')
+
+  const named = buildBill({ snapshot: twoProviders, catalogue: catalogue(), providerNames: { bos: 'BOS-API' }, by: 'vendor', range: 'month', now: SEPTEMBER })
+  assert.deepEqual(named.rows.map((row) => row.label).sort(), ['BOS-API', 'deepseek-official'])
+  // The pricing is unchanged by the label: same total, same split.
+  closeTo(named.totals.totalCost, plain.totals.totalCost)
+
+  // The model dimension keeps the two apart as well.
+  const byModel = buildBill({ snapshot: twoProviders, catalogue: catalogue(), providerNames: { bos: 'BOS-API' }, by: 'model', range: 'month', now: SEPTEMBER })
+  assert.deepEqual(byModel.rows.map((row) => row.label).sort(), ['bos/deepseek-v4-flash', 'deepseek-official/deepseek-v4-flash'])
+  assert.equal(byModel.rows.length, 2, 'two routes are two rows, not one merged model')
+})
+
+test('a plan may name the provider whose endpoint it pays for', () => {
+  // `bos` is an endpoint, `deepseek` is whose list price its tokens carry; a config
+  // file may reasonably write either, and both must reach the same usage.
+  const viaProvider = buildBill({
+    snapshot: snapshot(),
+    catalogue: catalogue(),
+    subscriptions: [{ vendor: 'openai-official', plan: 'GPT plan', amount: 140, currency: 'CNY', startedAt: '2026-09-01' }],
+    by: 'vendor',
+    range: 'month',
+    now: SEPTEMBER,
+  })
+  const viaPriceVendor = buildBill({
+    snapshot: snapshot(),
+    catalogue: catalogue(),
+    subscriptions: [{ vendor: 'openai', plan: 'GPT plan', amount: 140, currency: 'CNY', startedAt: '2026-09-01' }],
+    by: 'vendor',
+    range: 'month',
+    now: SEPTEMBER,
+  })
+  closeTo(viaProvider.totals.totalCost, 144.2)
+  closeTo(viaProvider.totals.totalCost, viaPriceVendor.totals.totalCost)
+  // The plan records both what it was written as and what it was charged against.
+  assert.equal(viaProvider.subscriptions[0].namedVendor, 'openai-official')
+  assert.equal(viaProvider.subscriptions[0].vendor, 'openai')
 })
 
 test('the dimensions and ranges on offer are the documented ones', () => {
@@ -520,7 +577,7 @@ test('a plan that has not started does not zero out the usage it never covered',
     range: 'month',
     now: SEPTEMBER,
   })
-  closeTo(bill.rows.find((row) => row.label === 'openai').cost, 70, 'the usage is still billed as usage')
+  closeTo(bill.rows.find((row) => row.label === 'openai-official').cost, 70, 'the usage is still billed as usage')
   closeTo(bill.totals.totalCost, 74.2)
   assert.equal(bill.totals.subscriptionCost, 0)
 })

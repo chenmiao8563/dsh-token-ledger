@@ -777,6 +777,9 @@ test('the overview carries what each of its periods cost', () => {
   assert.equal(body.cost.byRange.month.cost, 7)
   assert.equal(body.cost.byRange.week.cost, 7)
   assert.equal(body.cost.byRange.year.cost, 7)
+  // The whole-ledger tab is priced from the same bill, or switching to it would
+  // show a dash beside the totals it just summed.
+  assert.equal(body.cost.byRange.all.cost, 7)
   assert.equal(body.cost.byRange.today.unpricedTokens, 0)
 
   // Without a catalogue the tokens are still served, with no cost claimed.

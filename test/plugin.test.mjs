@@ -153,6 +153,32 @@ test('starts with an empty ledger when nothing is stored', async () => {
   }
 })
 
+test('a stored session is attributed to the directory its header names', async () => {
+  // Regression: `sessionPersistence` hands back the *sequenced* events plus the
+  // header separately, and the header line — the one carrying `cwd` — is not in that
+  // array. A backfill that read only the events therefore recorded every session
+  // with no working directory, and the whole workspace grouping collapsed to
+  // "(unknown)". The header's `cwd` is what fixes it, and it is read from whichever
+  // of the header-shaped objects has it.
+  const persistence = {
+    list: async () => [{ id: 'sess-alpha', cwd: 'D:\\from-list' }, { id: 'sess-beta' }],
+    inspect: async (id) => {
+      if (id === 'sess-alpha') return { meta: { id }, events: withSeq(ALPHA_EVENTS) }
+      return { meta: { id, cwd: 'E:\\from-meta' }, events: withSeq(ALPHA_EVENTS) }
+    },
+  }
+  const mounted = await mount({ persistence })
+  try {
+    await mounted.harness.dispose()
+    const snapshot = loadLedger(ledgerPaths(mounted.home, {}).ledger)
+    const byId = new Map(snapshot.sessions.map((session) => [session.sessionId, session.cwd]))
+    assert.equal(byId.get('sess-alpha'), 'D:\\from-list', 'the list header carries it')
+    assert.equal(byId.get('sess-beta'), 'E:\\from-meta', 'or the inspect meta does')
+  } finally {
+    mounted.cleanup()
+  }
+})
+
 test('backfills stored sessions, cutting only a fork prefix', async () => {
   const persistence = {
     list: async () => [{ id: 'sess-alpha' }, { id: 'sess-beta' }],

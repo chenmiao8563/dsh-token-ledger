@@ -100,7 +100,7 @@ test('buildSeries always emits at least today when the ledger is empty', () => {
   assert.equal(series[0].totalTokens, 0)
 })
 
-test('buildOverview separates the three ranges correctly', () => {
+test('buildOverview separates the four ranges correctly', () => {
   const snapshot = {
     updatedAt: NOW.getTime(),
     totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, reasoningTokens: 0 },
@@ -125,6 +125,12 @@ test('buildOverview separates the three ranges correctly', () => {
   assert.equal(overview.ranges.month.from, '2026-03-01')
   assert.equal(overview.ranges.year.totals.totalTokens, 160) // 10 + 20 + 30 + 40 + 60
   assert.equal(overview.ranges.year.from, '2026-01-01')
+  // Everything, including the day that sits in the previous year: the whole-ledger
+  // range is the one to read when the bill view is showing its own 全部.
+  assert.equal(overview.ranges.all.kind, 'all')
+  assert.equal(overview.ranges.all.from, '2025-12-31')
+  assert.equal(overview.ranges.all.totals.totalTokens, 161) // 1 + 160
+  assert.equal(overview.ranges.all.calls, 6)
 
   assert.equal(overview.today.date, '2026-03-15')
   assert.equal(overview.today.totals.totalTokens, 60)
@@ -140,6 +146,10 @@ test('buildOverview tolerates an empty or malformed snapshot', () => {
   for (const snapshot of [undefined, null, {}, { daily: 'nope' }, { totals: null, daily: [{ date: 5 }] }]) {
     const overview = buildOverview(snapshot, { now: NOW })
     assert.equal(overview.ranges.week.totals.totalTokens, 0)
+    // An empty ledger has nothing to reach back to, so the range starts today
+    // rather than at a date nobody wrote.
+    assert.equal(overview.ranges.all.totals.totalTokens, 0)
+    assert.equal(overview.ranges.all.from, '2026-03-15')
     assert.equal(overview.today.totals.totalTokens, 0)
     assert.equal(overview.series.length >= 1, true)
     assert.equal(overview.models.length, 0)

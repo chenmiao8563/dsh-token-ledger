@@ -426,12 +426,12 @@ test('an unavailable host renders the explanation instead of throwing', () => {
   assert.ok(hasText(failed.text, 'HTTP 404'))
 })
 
-test('a ready payload renders the three ranges, their metrics, today and the calendar', () => {
+test('a ready payload renders the four ranges, their metrics, today and the calendar', () => {
   const { module } = loadWithSection()
   const { tree, text } = render(module, { status: 'ready', data: payload(), error: null })
 
-  // Range switcher offers exactly the three requested periods.
-  for (const key of ['rangeMonth', 'rangeYear', 'rangeWeek']) assert.ok(hasText(text, key), `missing ${key}`)
+  // Range switcher offers exactly the four requested periods, the whole ledger last.
+  for (const key of ['rangeMonth', 'rangeYear', 'rangeWeek', 'rangeAll']) assert.ok(hasText(text, key), `missing ${key}`)
   // Metrics: total, cache hit rate, calls, and what the period cost.
   assert.ok(hasText(text, 'totalTokens'))
   assert.ok(hasText(text, 'cacheHitRate'))
@@ -468,6 +468,31 @@ test('the overview shows what a period cost, in the bill’s own currency', () =
   assert.ok(costMetric.includes('¥123.46'), `two decimals of the month: ${costMetric}`)
   assert.ok(costMetric.includes('CNY'), 'and the currency it is in')
   assert.ok(labels.indexOf(costMetric) > labels.findIndex((label) => label.includes('cacheHitRate')), 'it comes after the hit rate')
+
+  // One row of four, at one size. The row was four auto-fit columns with a 140px
+  // floor, which needed 596px of card to keep the fourth tile beside the others, and
+  // the estimate — the only tile that is money — was set at the smaller value size,
+  // so on a narrow panel it sat alone on a second row looking like a footnote.
+  const costElement = metrics.find((metric) => collectText(metric).includes('estCost'))
+  assert.equal(
+    String(findByClass(costElement, 'tl-metric-value').props.className),
+    'tl-metric-value',
+    'the estimate is set at the same size as the counts beside it',
+  )
+  const source = readFileSync(fileURLToPath(new URL('../lib/client.js', import.meta.url)), 'utf8')
+  assert.match(source, /\.tl-metrics \{ display: grid; grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/, 'four tiles, one row')
+  assert.doesNotMatch(source, /\.tl-metrics \{[^}]*auto-fit/, 'and nothing left to wrap onto a second row')
+
+  // The range switcher stays on the header's own line, at the right. As a plain
+  // row, its wrap was decided by the header's width, and a subtitle that filled
+  // the card pushed the four tabs onto a second line at the left.
+  const headerRows = findAllByClass(tree, 'tl-row-head')
+  assert.equal(headerRows.length, 1, 'the overview header row is marked as one')
+  assert.equal(String(headerRows[0].props.className), 'tl-row tl-row-head')
+  assert.equal(countByClass(headerRows[0], 'tl-tabs'), 1, 'and the range tabs are on it')
+  assert.match(source, /\.tl-row-head \{ flex-wrap: nowrap; align-items: flex-start; \}/, 'a header row never wraps, and its buttons sit in the corner the title does')
+  assert.match(source, /\.tl-row-head > \.tl-head \{ flex: 1 1 auto; min-width: 0; \}/, 'the header is the item that gives way')
+  assert.doesNotMatch(source, /\.tl-row-head \{[^}]*flex-wrap: wrap/, 'nothing on it is allowed to drop to a second line')
 
   // Today has its own number, not the month's.
   const todayBlock = findAllByClass(tree, 'tl-card').find((card) => collectText(card).some((value) => value.startsWith('today')))
@@ -1668,6 +1693,12 @@ test('the export at the top carries every grouping over every period', () => {
   assert.equal(exports[0].props.download, 'token-bill-all-2026-03-31.csv')
   assert.equal(exports[1].props.download, 'token-bill-all-2026-03-31.json')
   assert.ok(hasText(collectText(tree), 'billExportHint'), 'and the page says what the file contains')
+  // On the header row, so the two links stay in the top right corner however wide
+  // the page title's subtitle is.
+  const headerRows = findAllByClass(tree, 'tl-row-head')
+  assert.equal(headerRows.length, 1)
+  assert.equal(String(headerRows[0].props.className), 'tl-row tl-row-head')
+  assert.equal(countByClass(headerRows[0], 'tl-bill-actions'), 1, 'the export is on it')
 })
 
 test('the bill table shows a row per group, both halves of the input and the cost', () => {
@@ -1678,23 +1709,24 @@ test('the bill table shows a row per group, both halves of the input and the cos
   assert.equal(rows.length, 2, 'the plan and the pay-as-you-go line')
   assert.ok(collectText(rows[1]).includes('billPayAsYouGo'), 'the unnamed line is labelled by the view')
 
-  // The header names the two halves of the input, in the order a bill is read:
-  // what the cache served, then what had to be sent.
+  // The header: the group, what the row cost, then the tokens — the two halves of
+  // the input first, because they are priced differently — the hit rate, and the
+  // call count last.
   const head = collectText(findAllByClass(section, 'tl-bill-head')[0])
-  assert.deepEqual(head, ['billByWorkspace', 'calls', 'cacheReadTokens', 'inputTokens', 'outputTokens', 'cacheHitRate', 'billCost'])
+  assert.deepEqual(head, ['billByWorkspace', 'billCost', 'cacheReadTokens', 'inputTokens', 'outputTokens', 'cacheHitRate', 'calls'])
 
   const cells = rows[1].children
-  assert.equal(collectText(cells[1])[0], '4', 'calls')
+  assert.ok(hasText(collectText(cells[1]), '¥4.20'), 'cost')
   assert.equal(collectText(cells[2])[0], '0', 'cache-hit input')
   assert.equal(collectText(cells[3])[0], '40.00 万', 'uncached input')
   assert.equal(collectText(cells[4])[0], '4.00 万', 'output')
   assert.equal(collectText(cells[5])[0], '0.0%', 'hit rate')
-  assert.ok(hasText(collectText(cells[6]), '¥4.20'), 'cost')
+  assert.equal(collectText(cells[6])[0], '4', 'calls')
 
   // The plan row states the plan beside the usage it covers, not added to it.
   const planCells = rows[0].children
-  assert.ok(hasText(collectText(planCells[6]), '¥140.00'))
-  assert.ok(hasText(collectText(planCells[6]), 'billCoveredUsage ¥98.60'))
+  assert.ok(hasText(collectText(planCells[1]), '¥140.00'))
+  assert.ok(hasText(collectText(planCells[1]), 'billCoveredUsage ¥98.60'))
 
   const total = findAllByClass(section, 'tl-bill-total')[0]
   assert.ok(hasText(collectText(total), '¥144.20'), 'the total is the bill, not the usage alone')

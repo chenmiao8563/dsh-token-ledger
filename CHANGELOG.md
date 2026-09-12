@@ -4,6 +4,57 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-12
+
+Four things the bill got wrong when it was read against a real ledger, and the
+grouping it should have had from the start.
+
+### Fixed
+
+- **The workspace bill showed one `(unknown)` row.** The cause was in the host's
+  backfill, not in the bill: DSH's `sessionPersistence` returns the *sequenced*
+  events plus the session header **separately**, and the header line — the one
+  carrying `cwd` — is not in that array. Reading only the events therefore recorded
+  every session with no working directory, so every workspace row collapsed into
+  `(unknown)` — while a CLI `rebuild` of the same logs recorded every one of them.
+  The header's `cwd` is now read from whichever header-shaped object carries it
+  (`stored.meta`, the list header, `stored.session`, the object itself) and passed
+  into the fold, with the event scan kept as a fallback. Verified against this
+  machine's real logs through a real host: **140 of 140 sessions now carry a working
+  directory, where the same path recorded 1 of 75 before.**
+- **The bill's model column merged different endpoints.** A model row was labelled
+  with the price list's name, so `deepseek-official/deepseek-v4-flash` and
+  `bos/deepseek-v4-flash` both became `deepseek/DeepSeek-V4.1-Flash` — one row where
+  there are two, hiding that two separate endpoints were in use. A model row is now
+  the route the ledger recorded, `provider/model`, exactly as the overview's model
+  list shows it; the price row it was billed at travels in the tooltip.
+- **A cache-write bucket that never appeared was still named.** The composition key
+  under 按模型 printed the raw bucket name (`cacheWriteTokens`, untranslated) for a
+  bucket no bar ever drew, because nothing in the data wrote cache. The bucket is
+  translated, and a bucket with no tokens anywhere in the payload is left out of both
+  the bars and the key — a colour in the legend that appears in no bar is a puzzle,
+  not a fact. It comes back, named, as soon as there are cache-write tokens to show.
+
+### Changed
+
+- **A vendor row is the provider the model settings configured, not the price list's
+  vendor.** The two are not the same thing: `bos` is an endpoint someone connected,
+  and `deepseek` is whose list price its tokens carry — grouping by the price vendor
+  merged BOS-API's spending into DeepSeek's. The bill now groups by the provider the
+  request named, shows the display name the model settings page gives it (`BOS-API`
+  rather than `bos`), and states the price source underneath (`计价来源 deepseek`).
+  The names are read — never written — from the harness settings file; a provider with
+  no display name shows its id, and a settings file that cannot be read costs nothing
+  but the name.
+- **The bill's columns were reordered**: the group, **实际花费**, cache-read input,
+  uncached input, output, the cache hit rate, then the call count. What a row cost is
+  the number a bill is opened for; the count of calls is the least interesting thing
+  in it.
+- **A plan may name either the provider or the price vendor** in its config
+  (`vendor: bos` or `vendor: deepseek`); both resolve to the usage they cover, and the
+  plan records what it was written as (`namedVendor`) beside what it was charged
+  against (`vendor`).
+
 ## [0.6.0] - 2026-09-12
 
 The bill became a page rather than a table: four groupings stacked, each with its
@@ -42,6 +93,10 @@ cost, next to the tokens it counted.
   cannot disagree. A host with no prices shows a dash and says why rather than a
   confident `¥0.00`, and tokens the bill could not price are named under the number
   they are missing from.
+- **The overview offers all four periods**: 本月 / 本年 / 近 7 天 / **全部**. The last
+  one is every day the ledger holds, not the calendar year — its `from` is the first
+  day there is, so the totals say how far back they reach. The host prices it from
+  the bill's own 全部 range, because the browser has no day-by-day rows to sum.
 
 ### Changed
 
@@ -55,6 +110,18 @@ cost, next to the tokens it counted.
   a plan row already showed `其中覆盖用量 ¥…`.
 - **Ledger version 5**: each session carries the `title` DSH gave it. A version-4
   ledger is rewritten in the new shape on the next write; `rebuild` does it on demand.
+
+### Fixed
+
+- **The header row keeps its buttons in the top right corner.** The range tabs
+  shared a row that was allowed to wrap, and the wrap was decided by the header's
+  own width: a subtitle wide enough to fill the card pushed the tabs onto a second
+  line at the left, under the text they belong beside. Measured in a browser at six
+  panel widths, the four tabs sat on their own line up to 560px and in the corner
+  from 620px up. The header is now the item that gives way, wrapping its subtitle
+  inside itself, while everything else on the row keeps its natural width — so a
+  tab label never breaks between two characters and a button is never squeezed.
+  The bill's export links, on a row of the same shape, are kept there too.
 
 ## [0.5.0] - 2026-09-12
 
@@ -167,6 +234,14 @@ not shipped yet.
   be a 460px-tall box that scrolled inside the card, one scrollbar away from the
   settings panel's own; it now grows to its full height and lets the panel scroll.
   The sideways scroll stays, for a panel narrower than the table's 504px floor.
+- **The overview's four tiles are one row, at one size.** The row was
+  `repeat(auto-fit, minmax(140px, 1fr))`, which needs 4 x 140 + 3 gaps = 596px of
+  card before the fourth tile stays beside the others, so on a narrower settings
+  panel the estimated cost dropped onto a second row by itself — and it was set at
+  17px where the three counts beside it were 22px, which made the lone line look
+  deliberate. Four fixed quarters of the card now share whatever width there is,
+  and a value too wide for its tile wraps inside it rather than running into its
+  neighbour.
 - **The peak / off-peak label is no longer cut down to one character.** It was
   drawn inside the model-name span, and that span is the piece that clips its text,
   so on a long id the pill lost half of itself: measured in a browser,
@@ -487,7 +562,8 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.3.0...v0.4.0
