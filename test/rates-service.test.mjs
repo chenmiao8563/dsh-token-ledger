@@ -57,7 +57,10 @@ function makeService(options = {}) {
   const { fetchImpl, calls } = stubFetch(options)
   const service = createRatesService({
     path,
-    options: { fetchImpl, modelsUrl: 'https://models.test/list', fxUrl: 'https://rates.test/latest', now: options.now, ...options },
+    // The fixture here is OpenRouter-shaped, so these tests drive the gateway
+    // source explicitly; the per-vendor source has its own fixture below. The
+    // spread comes last so a test can ask for the other one.
+    options: { source: 'openrouter', fetchImpl, modelsUrl: 'https://models.test/list', fxUrl: 'https://rates.test/latest', now: options.now, ...options },
   })
   return { service, path, calls, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
@@ -98,7 +101,10 @@ test('a failed refresh keeps the last good values and says the attempt failed', 
   const dir = mkdtempSync(join(tmpdir(), 'token-ledger-rates-'))
   const path = join(dir, 'rates.json')
   try {
-    const first = createRatesService({ path, options: { fetchImpl: stubFetch().fetchImpl, modelsUrl: 'https://models.test/list', fxUrl: 'https://rates.test/latest' } })
+    const first = createRatesService({
+      path,
+      options: { source: 'openrouter', fetchImpl: stubFetch().fetchImpl, modelsUrl: 'https://models.test/list', fxUrl: 'https://rates.test/latest' },
+    })
     await first.refresh()
     const good = first.read()
     assert.equal(good.catalogue.available, true)
@@ -106,7 +112,12 @@ test('a failed refresh keeps the last good values and says the attempt failed', 
     // The same cache file, but now nothing is reachable.
     const offline = createRatesService({
       path,
-      options: { fetchImpl: stubFetch({ failModels: true, failFx: true }).fetchImpl, modelsUrl: 'https://models.test/list', fxUrl: 'https://rates.test/latest' },
+      options: {
+        source: 'openrouter',
+        fetchImpl: stubFetch({ failModels: true, failFx: true }).fetchImpl,
+        modelsUrl: 'https://models.test/list',
+        fxUrl: 'https://rates.test/latest',
+      },
     })
     const before = offline.read()
     assert.equal(before.catalogue.available, true, 'the cache is read at construction, before any fetch')
@@ -250,7 +261,14 @@ test('fetchJson reports a timeout, an HTTP error and malformed JSON instead of t
   const malformed = await fetchJson('https://x.test', { fetchImpl: async () => ({ ok: true, status: 200, text: async () => 'not json' }) })
   assert.equal(malformed.ok, false)
 
-  const huge = await fetchJson('https://x.test', { fetchImpl: async () => ({ ok: true, status: 200, text: async () => 'x'.repeat(5 * 1024 * 1024) }) })
+  // The per-vendor price list is 4.6 MB today, so a response that size is a real
+  // one and must not be mistaken for an attack.
+  const realistic = await fetchJson('https://x.test', {
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ pad: 'x'.repeat(5 * 1024 * 1024) }) }),
+  })
+  assert.equal(realistic.ok, true, 'a five-megabyte body is a real response')
+
+  const huge = await fetchJson('https://x.test', { fetchImpl: async () => ({ ok: true, status: 200, text: async () => 'x'.repeat(9 * 1024 * 1024) }) })
   assert.equal(huge.ok, false)
   assert.match(huge.reason, /body too large/)
 
@@ -266,6 +284,80 @@ test('a malformed response body is a failed source, not a crash', async () => {
     assert.match(outcome.catalogue, /^failed \(no usable models/)
     assert.match(outcome.fx, /^failed \(no usable rate/)
     assert.equal(service.read().catalogue.available, false)
+  } finally {
+    cleanup()
+  }
+})
+
+/* ------------------------------------------------ the per-vendor price source -- */
+
+/** A models.dev-shaped payload: two of the vendors the page publishes. */
+const MODELSDEV = {
+  deepseek: {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    models: {
+      'deepseek-v4-flash': { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', release_date: '2026-09-10', limit: { context: 128000 }, cost: { input: 0.15, output: 0.6, cache_read: 0.003 } },
+      'deepseek-v4-pro': { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', release_date: '2026-09-01', cost: { input: 0.435, output: 0.87 } },
+    },
+  },
+  // Qwen is sold under Alibaba's provider id, not "qwen".
+  alibaba: {
+    id: 'alibaba',
+    name: 'Alibaba',
+    models: {
+      'qwen3.8-max': { id: 'qwen3.8-max', name: 'Qwen3.8 Max', release_date: '2026-08-03', limit: { context: 1000000 }, cost: { input: 2, output: 6, cache_read: 0.25, cache_write: 2.5 } },
+      'unpriced-model': { id: 'unpriced-model', name: 'No Price', release_date: '2026-09-30' },
+    },
+  },
+  // A vendor with no entry in the mapping must not appear at all.
+  openai: { id: 'openai', name: 'OpenAI', models: {} },
+}
+
+test('the default source is each vendor’s own list price, not a gateway quote', async () => {
+  const { service, calls, cleanup } = makeService({ source: 'modelsdev', models: MODELSDEV })
+  try {
+    const outcome = await service.refresh({ reason: 'test' })
+    assert.match(outcome.catalogue, /^ok/)
+    assert.match(outcome.catalogue, /modelsdev/, 'the log says which source answered')
+
+    const state = service.read()
+    assert.equal(state.priceSource, 'modelsdev')
+    assert.equal(state.catalogue.sourceId, 'modelsdev')
+    assert.equal(state.catalogue.modelCount, 3, 'the unpriced model is not published')
+    assert.deepEqual(state.vendors.map((entry) => entry.vendor), ['deepseek', 'qwen'], 'curated order, mapped ids')
+    const flash = state.vendors[0].models[0]
+    assert.equal(flash.id, 'deepseek/deepseek-v4-flash', 'a bare id is namespaced for overrides and tooltips')
+    assert.equal(flash.prices.input, 0.15, 'USD per million, straight from the vendor list')
+    assert.equal(flash.prices.cacheRead, 0.003)
+    assert.equal(flash.contextLength, 128000)
+    assert.equal(flash.created, Date.parse('2026-09-10'))
+    const max = state.vendors[1].models[0]
+    assert.equal(max.id, 'qwen/qwen3.8-max')
+    assert.equal(max.prices.cacheWrite, 2.5, 'a cache-write price is carried when the source has one')
+    assert.equal(calls.length, 2)
+  } finally {
+    cleanup()
+  }
+})
+
+test('an unknown source falls back to the default instead of failing', async () => {
+  const { service, cleanup } = makeService({ source: 'nonsense', models: MODELSDEV })
+  try {
+    const outcome = await service.refresh()
+    assert.match(outcome.catalogue, /modelsdev/)
+    assert.equal(service.read().priceSource, 'modelsdev')
+  } finally {
+    cleanup()
+  }
+})
+
+test('switching source to the gateway changes both the URL and the parsing', async () => {
+  const { service, calls, cleanup } = makeService({ source: 'openrouter' })
+  try {
+    await service.refresh()
+    assert.equal(service.read().catalogue.sourceId, 'openrouter')
+    assert.match(calls[0], /models\.test/, 'the configured URL still wins')
   } finally {
     cleanup()
   }

@@ -19,13 +19,17 @@ section now has **概览 / Overview** and **费率 / Rates** tabs at the top.
   vendor's newest models with their published prices per million tokens — input,
   output, cache read and cache write — and it lets any of those numbers be typed
   over by hand.
-  - **Prices** come from a keyless public model list (OpenRouter's
-    `/api/v1/models` by default), filtered to the newest **two to three models per
-    vendor**. The full list runs to hundreds of entries, most of them superseded,
-    and a table nobody can scan is not a price list. Variants (`:batch`, `:free`,
-    …) are excluded from that selection because they are the same model at a
-    different price, and letting them count would fill a vendor's quota with one
-    model three times.
+  - **Prices** are each vendor's **own list price**, from a per-vendor price list
+    (models.dev by default), filtered to the newest **two to three models per
+    vendor**. Vendors' own model-list APIs return model ids and no prices at all —
+    the price only exists on their pricing page — so a per-vendor price list has
+    to come from somewhere that reads those pages, and the page says which source
+    it is showing. The source is switchable (`rates.source`): `openrouter` reads a
+    gateway's quotes instead, which cover more models but are not the vendors'
+    numbers. Spot-checking both against the vendors' own pages is what settled the
+    default: on Z.ai's advertised prices `models.dev` agreed with the page while
+    OpenRouter differed by more than a factor of two on two models, and across the
+    27 models both sources describe they agreed on 21 and differed on 6.
   - **The rate** comes from a keyless exchange-rate endpoint and is shown to four
     decimals with its source and age. It is displayed for reference only: **no
     token count is multiplied by any price on this page**, which is why the rate
@@ -33,6 +37,15 @@ section now has **概览 / Overview** and **费率 / Rates** tabs at the top.
   - **Freshness travels with the value.** Every served number carries where it
     came from and how long ago it was fetched, because a stale price that looks
     live is worse than no price.
+  - **A zero price is flagged, not called free.** Some platforms bill by the hour
+    and publish 0 per token (Nvidia's NIM catalogue is the live example); the row
+    keeps the number, is marked, and the page explains that 0 may mean "not priced
+    per token" rather than "free". Plan and long-context tiers are not shown, so a
+    row is the base-tier price.
+  - **A vendor's own models come before the ones it resells.** Bedrock lists
+    `openai.*`, Nvidia lists `deepseek-ai/*`, Alibaba lists DeepSeek too, and one
+    such row was taking Mistral's newest slot away from Mistral. The ordering
+    prefers the vendor's own models; nothing is dropped over it.
 - **Offline is a supported state, not an error.** The host refreshes every
   30 minutes; a failed refresh keeps the last good result on disk and reports
   the attempt as failed rather than clearing anything, so a firewalled machine
@@ -47,8 +60,9 @@ section now has **概览 / Overview** and **费率 / Rates** tabs at the top.
   that is being edited clears that one price. This is the whole offline story: with
   `rates: false` a strictly offline host makes no request at all and the page is a
   price list the user maintains themselves.
-- `lib/rates.js` (pure: payloads in, rows out) and `lib/rates-service.js` (the
-  network, the cache file, the timer, and the merge of hand-entered values).
+- `lib/rates.js` (pure: payloads in, rows out, one parser per source) and
+  `lib/rates-service.js` (the network, the cache file, the timer, the source
+  switch, and the merge of hand-entered values).
 - `GET|POST /api/token-ledger/rates`. The write half is restricted: a JSON
   content type is required — a cross-origin form can only send `urlencoded`,
   `multipart` or `text/plain`, so requiring JSON is what keeps another page from

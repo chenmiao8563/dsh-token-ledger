@@ -12,10 +12,15 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  DEFAULT_PRICE_SOURCE,
+  MODELSDEV_URL,
+  OPENROUTER_MODELS_URL,
   PRICE_CURRENCY,
+  PRICE_SOURCES,
   applyOverrides,
   parseCatalogue,
   parseFx,
+  parseModelsDev,
   pricePerMillion,
   validateOverrides,
 } from '../lib/rates.js'
@@ -160,6 +165,113 @@ test('a publisher alias is never published as a vendor', () => {
   assert.equal(parsed.selected, 1)
 })
 
+test('the per-vendor source publishes each vendor’s own list price', () => {
+  // Same output shape as the gateway source, but the prices are the vendors'
+  // own, the ids are bare and have to be namespaced, and a vendor with no entry
+  // is simply absent.
+  const payload = {
+    deepseek: {
+      models: {
+        'deepseek-v4-pro': { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', release_date: '2026-09-01', limit: { context: 65536 }, cost: { input: 0.435, output: 0.87 } },
+        'deepseek-v4-flash': { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', release_date: '2026-09-10', limit: { context: 128000 }, cost: { input: 0.15, output: 0.6, cache_read: 0.003, cache_write: 0 } },
+        'deepseek-no-price': { id: 'deepseek-no-price', name: 'No Price', release_date: '2026-12-31' },
+      },
+    },
+    // Qwen is sold under Alibaba's provider id.
+    alibaba: {
+      models: {
+        'qwen3.8-max': { id: 'qwen3.8-max', name: 'Qwen3.8 Max', release_date: '2026-08-03', cost: { input: 2, output: 6 } },
+      },
+    },
+    // Already namespaced by the source, so it must not be prefixed twice.
+    nvidia: {
+      models: {
+        'nvidia/nemotron-3.5-lightning': { id: 'nvidia/nemotron-3.5-lightning', name: 'Nemotron 3.5', release_date: '2026-08-11', cost: { input: 0.1, output: 0.4 } },
+      },
+    },
+    // Not one of the curated vendors, and not published.
+    someotherprovider: { models: { x: { id: 'x', name: 'X', release_date: '2026-01-01', cost: { input: 1, output: 1 } } } },
+  }
+
+  const parsed = parseModelsDev(payload, { vendorLimit: 0 })
+  assert.deepEqual(parsed.vendors.map((entry) => entry.vendor), ['deepseek', 'qwen', 'nvidia'], 'curated order, mapped provider ids')
+  assert.equal(parsed.availableVendorCount, 3)
+  assert.equal(parsed.selected, 4, 'two from DeepSeek, one from each of the others')
+
+  const deepseek = parsed.vendors[0]
+  assert.equal(deepseek.modelCount, 2, 'the unpriced model is not counted')
+  assert.deepEqual(deepseek.models.map((entry) => entry.id), ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro'], 'newest by release date, bare ids namespaced')
+  const flash = deepseek.models[0]
+  assert.equal(flash.name, 'DeepSeek V4 Flash', 'the source name is used as-is, without a vendor prefix')
+  assert.equal(flash.prices.input, 0.15, 'USD per million, as published')
+  assert.equal(flash.prices.cacheRead, 0.003)
+  assert.equal(flash.prices.cacheWrite, 0, 'a zero cache-write price is a price, not a gap')
+  assert.equal(flash.contextLength, 128000)
+  assert.equal(flash.created, Date.parse('2026-09-10'))
+  assert.equal(flash.vendor, 'deepseek')
+
+  assert.equal(parsed.vendors[2].models[0].id, 'nvidia/nemotron-3.5-lightning', 'an id already carrying a vendor part is left alone')
+  assert.equal(parsed.total, 4, 'every priced model the curated vendors listed')
+})
+
+test('a vendor’s own models win its slots over the ones it hosts', () => {
+  // Bedrock lists openai.*, Nvidia lists deepseek-ai/*, Alibaba lists DeepSeek.
+  // Those rows are real prices for the platform, but a hosted model must not take
+  // a vendor's slot away from the vendor itself — which is what happened to
+  // Mistral, whose newest row was a Z.ai model.
+  const payload = {
+    mistral: {
+      models: {
+        'zai-glm-5-2': { id: 'zai-glm-5-2', name: 'GLM-5.2', release_date: '2026-09-30', cost: { input: 1.4, output: 4.4 } },
+        'mistral-medium-2604': { id: 'mistral-medium-2604', name: 'Mistral Medium 3.5', release_date: '2026-04-29', cost: { input: 1.5, output: 7.5 } },
+      },
+    },
+    nvidia: {
+      models: {
+        'deepseek-ai/deepseek-v4-pro': { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek V4 Pro', release_date: '2026-09-20', cost: { input: 0, output: 0 } },
+        'nvidia/nemotron-3.5-lightning': { id: 'nvidia/nemotron-3.5-lightning', name: 'Nemotron 3.5 Lightning', release_date: '2026-08-11', cost: { input: 0.1, output: 0.4 } },
+      },
+    },
+  }
+
+  const parsed = parseModelsDev(payload, { vendorLimit: 0, perVendor: 1 })
+  assert.deepEqual(
+    parsed.vendors.map((entry) => entry.models[0].id),
+    ['mistralai/mistral-medium-2604', 'nvidia/nemotron-3.5-lightning'],
+    'the vendor comes before its hosted guests, even when the guest is newer',
+  )
+  // Nothing is dropped: the hosted row is still in the vendor's list.
+  const wide = parseModelsDev(payload, { vendorLimit: 0, perVendor: 5 })
+  assert.equal(wide.selected, 4)
+})
+
+test('an all-zero price is flagged rather than quietly called free', () => {
+  // Nvidia NIM is billed by GPU-hour and lists 0 per token, so a bare ¥0 would
+  // claim the model is free. The row keeps the number and carries the warning.
+  const payload = {
+    nvidia: {
+      models: {
+        'nvidia/nemotron-3.5-lightning': { id: 'nvidia/nemotron-3.5-lightning', name: 'Nemotron 3.5', release_date: '2026-08-11', cost: { input: 0, output: 0 } },
+        'nvidia/priced': { id: 'nvidia/priced', name: 'Priced', release_date: '2026-08-10', cost: { input: 0, output: 0.4 } },
+      },
+    },
+  }
+  const parsed = parseModelsDev(payload, { vendorLimit: 0 })
+  const models = parsed.vendors[0].models
+  assert.equal(models[0].zero, true, 'both headline prices are zero')
+  assert.equal(models[1].zero, false, 'a zero input beside a real output is not a zero row')
+  assert.deepEqual(models[0].prices, { input: 0, output: 0, cacheRead: null, cacheWrite: null }, 'the published number is kept unchanged')
+})
+
+test('the per-vendor source survives a payload that is not what it expects', () => {
+  for (const payload of [undefined, null, {}, { deepseek: null }, { deepseek: { models: null } }, { deepseek: { models: { a: null, b: 5, c: { id: 1 } } } }]) {
+    const parsed = parseModelsDev(payload)
+    assert.deepEqual(parsed.vendors, [], JSON.stringify(payload))
+    assert.equal(parsed.selected, 0)
+    assert.equal(parsed.availableVendorCount, 0)
+  }
+})
+
 test('an empty or malformed payload yields an empty catalogue rather than throwing', () => {
   for (const payload of [undefined, null, {}, { data: 'nope' }, { data: [null, 5, {}] }]) {
     const parsed = parseCatalogue(payload)
@@ -298,4 +410,13 @@ test('validateOverrides keeps only the fields it understands', () => {
 
 test('the published currency is USD, quoted in CNY', () => {
   assert.equal(PRICE_CURRENCY, 'USD')
+})
+
+test('the default source is the per-vendor price list, and both sources are named', () => {
+  // Which source answers is a user-visible claim, so the default and the set of
+  // acceptable values are pinned rather than left to whoever reads the code.
+  assert.equal(DEFAULT_PRICE_SOURCE, 'modelsdev')
+  assert.deepEqual(PRICE_SOURCES, ['modelsdev', 'openrouter'])
+  assert.match(MODELSDEV_URL, /^https:\/\/models\.dev\//)
+  assert.match(OPENROUTER_MODELS_URL, /^https:\/\/openrouter\.ai\//)
 })

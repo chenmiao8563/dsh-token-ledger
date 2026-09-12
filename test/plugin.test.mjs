@@ -417,14 +417,18 @@ test('a cached catalogue is still served to a later host with no network at all'
   }
 
   // First host: online, so the prices are fetched and cached beside the ledger.
+  // The fixture is OpenRouter-shaped, so this pair of mounts drives the gateway
+  // source explicitly rather than the default per-vendor one.
   const online = await mount({
     home,
+    config: { rates: { source: 'openrouter' } },
     extraServices: { webServer: { register: () => () => {} } },
     fetchImpl: (url) =>
       Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(String(url).includes('openrouter') ? catalogue : fx)) }),
   })
   try {
     const stored = JSON.parse(readFileSync(ledgerPaths(home, {}).rates, 'utf8'))
+    assert.equal(stored.catalogue.sourceId, 'openrouter')
     assert.equal(stored.catalogue.vendors[0].vendor, 'acme')
     assert.equal(stored.catalogue.vendors[0].models[0].id, 'acme/two', 'the newest model comes first')
     assert.equal(stored.catalogue.vendors[0].models[0].prices.input, 2, 'USD per million tokens')
@@ -437,6 +441,7 @@ test('a cached catalogue is still served to a later host with no network at all'
   const routes = []
   const offline = await mount({
     home,
+    config: { rates: { source: 'openrouter' } },
     extraServices: { webServer: { register: (route) => routes.push(route) } },
   })
   try {

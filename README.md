@@ -177,11 +177,20 @@ tabs: **Overview** and **Rates**.
   cost**, and it says so on the page.
 - **Each vendor's newest models**, two to three per vendor, with the published
   price per million tokens for input, output, cache read and cache write. Prices
-  are **converted into yuan** with the rate above; every converted cell keeps the
-  dollar quote it came from in its tooltip, and with no rate fetched the table
-  falls back to USD and labels its column in dollars rather than printing a number
-  it cannot stand behind. A price the vendor does not publish is a dash, which is a
-  different claim from "free".
+  are **the vendors' own list prices**, taken from a per-vendor price list and
+  converted into yuan with the rate above; every converted cell keeps the dollar
+  quote it came from in its tooltip, and with no rate fetched the table falls back
+  to USD and labels its column in dollars rather than printing a number it cannot
+  stand behind. A price the vendor does not publish is a dash, which is a different
+  claim from "free", and a published `0` is flagged as *not necessarily free*
+  because some platforms bill by the hour and publish no per-token price.
+- **Prices come from where the vendors publish them.** None of these vendors
+  exposes prices through an API — their model-list endpoints return ids and no
+  money, so the number only exists on their pricing page. The default source is
+  [models.dev](https://models.dev), which reads those pages and is what the page
+  attributes its prices to; `rates.source: openrouter` switches to that gateway's
+  own quotes, which cover more models but are not the vendors' list prices. The
+  page says which one it is showing, because the two are different claims.
 - **The fifteen most familiar vendors**, in a curated order rather than by model
   count: the live list runs to 59, most of them one-model publishers nobody is
   shopping for, and a table of 59 is not a price list either. Each vendor carries a
@@ -233,10 +242,11 @@ Override the composition entry by its `id`:
     rates: false                        # default: true — false makes no network request at all
     # rates also takes an object:
     # rates:
+    #   source: modelsdev                # default: each vendor's own list price; 'openrouter' for gateway quotes
     #   refreshIntervalMs: 1800000       # default: 30 minutes
     #   perVendor: 3                     # default: 3 newest models per vendor
     #   vendors: 15                      # default: the 15 most familiar; 0 publishes every vendor
-    #   modelsUrl: 'https://…/models'    # default: OpenRouter's public model list
+    #   modelsUrl: 'https://…'           # default: per source — https://models.dev/api.json
     #   fxUrl: 'https://…/latest/USD'    # default: open.er-api.com
 ```
 
@@ -251,9 +261,10 @@ wants; the rates page still works.
   have to combine per-model token counts with the price of the route actually
   billed, and both are approximate in ways that make the result wrong in a
   plausible-looking way. Do that arithmetic with your own billing data.
-- **No bundled price list.** Prices are fetched, or typed by you. A price list
-  shipped inside the package would be wrong within weeks and would have to be
-  updated by a release.
+- **No bundled price list.** Prices are fetched from a source you can choose — the
+  default is each vendor's own list price — or typed by you. A price list shipped
+  inside the package would be wrong within weeks and would have to be updated by a
+  release.
 - **No model-facing tool.** A tool schema costs prompt tokens on every request
   and shifts the cache prefix — a strange thing for a token-accounting plugin to
   do. `/tokens` and the CLI cover the human cases.

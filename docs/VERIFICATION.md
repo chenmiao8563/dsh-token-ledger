@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm test` — 180 tests in 11 files, no dependencies to install, no network. The
+`npm test` — 190 tests in 11 files, no dependencies to install, no network. The
 suite replaces `globalThis.fetch` for the duration of a mount, so the pricing
 refresh is exercised against a host with no route to the internet and no test can
 reach the real one:
@@ -28,9 +28,9 @@ reach the real one:
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
 | `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
 | `test/route.test.mjs` | 24 | both routes: the loopback and origin guard, unsupported methods, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 path |
-| `test/rates.test.mjs` | 18 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection, the curated vendor cap and its order, alias exclusion, variant and retired-model exclusion, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
-| `test/rates-service.test.mjs` | 9 | fetch, cache and schedule: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, and every transport fault is reported instead of thrown |
-| `test/client.test.mjs` | 37 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the currency conversion and the USD fallback, the brand marks, the column geometry that keeps model names visible, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
+| `test/rates.test.mjs` | 23 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
+| `test/rates-service.test.mjs` | 12 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
+| `test/client.test.mjs` | 39 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the currency conversion and the USD fallback, the brand marks, the column geometry that keeps model names visible, which source the page attributes its prices to, the zero-price marking, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
 | `test/client-render.test.mjs` | 13 | the same views under the real React, asserting the actual markup and that the library raises no complaint |
 | `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
 
@@ -196,7 +196,54 @@ publish in the new scope — during that window `dist-tags` and the tarball were
 already live while `GET /@chenmiao8563%2Fdsh-token-ledger` still returned 404.
 That is registry propagation, not a failed publish.
 
-### Note for whoever verifies this next
+### Where the prices come from, and why that source
+
+The question that produced this section was the right one to ask: the first cut
+of the rates view took its numbers from OpenRouter's model list, which is a
+**gateway's** price list, not any vendor's own. Checking that claim is what
+changed the default.
+
+**No vendor exposes prices through an API.** Probed directly: DeepSeek's
+`/models` answers `401` without a key, Anthropic's `/v1/models` answers `403`,
+and the documented shape of those endpoints is model ids with no money in them.
+Prices exist only on the vendors' pricing pages. The one genuinely public price
+API found was Microsoft's Azure Retail Prices (`prices.azure.com`, HTTP 200, but
+`Count: 0` for the filter tried), which covers Azure only.
+
+**Two machine-readable per-vendor sources were evaluated.** LiteLLM's
+`model_prices_and_context_window.json` could not be reached from this machine
+(`raw.githubusercontent.com` times out). [models.dev](https://models.dev)
+answered in 4.6 MB: **213 providers and 7,751 models, 7,314 with a `cost` block**
+of `input`/`output` and usually `cache_read` (4,765) and/or `cache_write` (1,542),
+all numeric, none negative, every priced model carrying a `release_date`. It
+covers the vendors the page publishes, under its own ids — `alibaba` for Qwen,
+`mistral` for Mistral, `xai` for xAI, `zai` for Z.ai, `meta` for Meta,
+`amazon-bedrock` for Amazon, `volcengine` for ByteDance.
+
+**Checked against the vendors' own pages.** The dataset is only worth calling
+"the vendor's own list price" if the numbers appear where the vendor published
+them:
+
+| Vendor page | Result |
+| --- | --- |
+| `api-docs.deepseek.com/quick_start/pricing` | 3 of its 4 models match exactly, including `deepseek-v4-flash` at `0.15 / 0.6 / cacheRead 0.003`; `deepseek-v4-pro` at `0.435 / 0.87` is **not** on the page |
+| `docs.z.ai/guides/overview/pricing` | 11 of 16 match, including `glm-5.2 = 1.4 / 4.4` and `glm-5.3 = 1.4 / 4.4` |
+| `mistral.ai/pricing` | could not be reached from this machine |
+
+The Z.ai line is the one that settled the default. For `glm-5.2` and
+`glm-5.3-flash` OpenRouter quotes `0.6 / 2` and `0.15 / 0.5`, while both
+models.dev and Z.ai's own page say `1.4 / 4.4` and `0.075 / 0.25`. Across the 27
+models both sources describe, **21 agree and 6 differ** — and where they differ,
+the vendor's page sides with the per-vendor dataset. OpenRouter's
+`moonshotai/kimi-k3` price of `2.302729 / 11.550195` is the tell: a number like
+that is a blend across routes, not a list price.
+
+**Still not verified:** that every row is current. Mistral could not be checked
+here, a handful of Z.ai rows did not match its page, and the dataset is
+community-maintained. This is why the page names its source, keeps the fetch time
+on screen, and lets any number be typed over.
+
+## Note for whoever verifies this next
 
 On this machine the `dsh` shell shim hardcodes `DSH_HOME`, so exporting
 `DSH_HOME` before calling `dsh` does **not** isolate anything — it edits the real

@@ -875,6 +875,57 @@ test('the manual entry form names every field it can set', () => {
   }
 })
 
+test('a zero price is marked, because ¥0 is not the same claim as free', () => {
+  const { module } = loadWithSection()
+  const withZero = ratesPayload({
+    vendors: [
+      {
+        vendor: 'nvidia',
+        modelCount: 2,
+        models: [
+          { id: 'nvidia/nemotron-3.5', name: 'Nemotron 3.5', vendor: 'nvidia', created: 1, contextLength: null, prices: { input: 0, output: 0, cacheRead: null, cacheWrite: null }, source: 'fetched', zero: true },
+          { id: 'nvidia/priced', name: 'Priced', vendor: 'nvidia', created: 1, contextLength: null, prices: { input: 0.1, output: 0.4, cacheRead: null, cacheWrite: null }, source: 'fetched' },
+        ],
+      },
+    ],
+  })
+  const { tree, text } = renderRates(module, { status: 'ready', data: withZero, error: null })
+  assert.ok(hasText(text, 'zeroPriceNote'), 'the page explains what a zero means')
+  const rows = findAllByClass(tree, 'tl-rate-row')
+  assert.equal(rows[0].props['data-zero'], 'true')
+  assert.equal(rows[1].props['data-zero'], 'false', 'only an all-zero row is marked')
+  assert.ok(rows[0].children.some((child) => String(child.props?.title ?? '').includes('zeroPriceHint')))
+
+  // A table with no zero rows says nothing about zeros.
+  const { text: clean } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  assert.ok(!hasText(clean, 'zeroPriceNote'))
+})
+
+test('the page says which prices these are, because the two sources claim different things', () => {
+  const { module } = loadWithSection()
+  // The default source prices each vendor's own models.
+  const vendor = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  assert.ok(hasText(vendor.text, 'sourceVendorPrices'))
+  assert.ok(!hasText(vendor.text, 'sourceGatewayPrices'), 'the two claims are not both shown')
+
+  // A gateway quote is a different claim, and has to be named as one.
+  const gateway = renderRates(module, { status: 'ready', data: ratesPayload({ priceSource: 'openrouter' }), error: null })
+  assert.ok(hasText(gateway.text, 'sourceGatewayPrices'))
+  assert.ok(!hasText(gateway.text, 'sourceVendorPrices'))
+
+  // Nothing to attribute when nothing arrived.
+  const offline = renderRates(module, {
+    status: 'ready',
+    error: null,
+    data: ratesPayload({
+      catalogue: { available: false, fetchedAt: null, ageMs: null, source: 'https://models.dev/api.json', totalAvailable: null, modelCount: 0, vendorCount: 0 },
+      vendors: [],
+    }),
+  })
+  assert.ok(!hasText(offline.text, 'sourceVendorPrices'))
+  assert.ok(!hasText(offline.text, 'sourceGatewayPrices'))
+})
+
 test('a stale rates read keeps showing the previous payload with a note', () => {
   const { module } = loadWithSection()
   const { text } = renderRates(module, { status: 'stale', data: ratesPayload(), error: 'network' })
