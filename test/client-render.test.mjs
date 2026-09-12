@@ -413,10 +413,9 @@ test('every vendor group renders a header and one row per model', { skip }, () =
   // The US dollar quote it came from is on the cell, not lost.
   assert.ok(html.includes('title="priceUsdHint $75"'), html.slice(html.indexOf('tl-rate-price'), html.indexOf('tl-rate-price') + 200))
   // Each vendor group carries a mark, and the table is wide enough to name its
-  // models: the name column has a floor and the table scrolls under it.
+  // models: the name column has a floor and the list scrolls under it.
   assert.equal(countClass(html, 'tl-logo'), 2)
   assert.equal(countClass(html, 'tl-rate-table'), 2)
-  assert.equal(countClass(html, 'tl-rate-scroll'), 2)
 })
 
 test('the hand-entry form is a real form, with one field per price', { skip }, () => {

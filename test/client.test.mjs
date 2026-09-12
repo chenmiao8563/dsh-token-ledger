@@ -789,14 +789,21 @@ test('the model-name column has a floor, and a table too wide for the pane scrol
   // The reported bug: with a fixed 470px of price and action columns, a narrow
   // panel left the name column zero pixels wide and the table showed prices for a
   // model nobody could identify. The fix is a floor on the name column plus a
-  // horizontally scrollable table, so both halves are pinned here.
+  // scrolling list, so both halves are pinned here — and the floor is worth more
+  // than the prices, which is why the name column is the flexible one.
   const source = readFileSync(fileURLToPath(new URL('../lib/client.js', import.meta.url)), 'utf8')
-  assert.match(source, /\.tl-rate-head, \.tl-rate-row \{ display: grid; grid-template-columns: minmax\(\d+px, 1fr\)/)
-  assert.match(source, /\.tl-rate-table \{ min-width: \d+px/)
+  const grid = /\.tl-rate-head, \.tl-rate-row \{ display: grid; grid-template-columns: minmax\((\d+)px, 1fr\) repeat\(4, (\d+)px\) (\d+)px; align-items: center; gap: (\d+)px/.exec(source)
+  assert.ok(grid !== null, 'the row geometry is declared in one place')
+  const floor = Number(grid[1])
+  assert.ok(floor >= 180, `the name column must keep room for a real model name, saw ${floor}px`)
+  // The declared minimum has to cover the columns it is derived from, or the row
+  // overflows its own box and the scroll width lies about what is hidden.
+  const declared = Number(/\.tl-rate-table \{ min-width: (\d+)px/.exec(source)?.[1])
+  assert.equal(declared, floor + 4 * Number(grid[2]) + Number(grid[3]) + 5 * Number(grid[4]), 'the table minimum matches its columns')
+  assert.match(source, /\.tl-rates-list \{[^}]*overflow: auto/, 'one scroll container for the whole list')
 
   const { module } = loadWithSection()
   const { tree } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
-  assert.equal(countByExactClass(tree, 'tl-rate-scroll'), 2, 'one scroll container per vendor group')
   assert.equal(countByExactClass(tree, 'tl-rate-table'), 2, 'the header and its rows stay in one table')
 })
 
