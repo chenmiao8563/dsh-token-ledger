@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-09-12
+
+### Fixed
+
+- **The exported CSV showed Chinese names as mojibake** — `.dsh/缂栧啓缁熻dsh token鐢ㄩ噺鎻掍欢`
+  where the session was `.dsh/编写统计dsh token用量插件`. The bytes were never wrong: the
+  export is UTF-8, and `缂栧啓` is exactly what `编写` looks like when UTF-8 is read as
+  GBK. What was missing was the three-byte **UTF-8 byte-order mark**, without which
+  Excel opens a `.csv` in the system code page on a Chinese Windows. Both CSV writers
+  — the bill's export and the CLI's `export` tables — now start with it, and each has a
+  test that asserts the file's **bytes** rather than its string, because `trim()` strips
+  the mark and a mark no reader sees fixes nothing. The JSON export deliberately still
+  has none: a JSON parser rejects a leading mark, and nothing opens JSON in Excel
+  expecting a spreadsheet.
+
 ## [0.7.0] - 2026-09-12
 
 Four things the bill got wrong when it was read against a real ledger, and the
@@ -562,7 +577,8 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.4.0...v0.5.0

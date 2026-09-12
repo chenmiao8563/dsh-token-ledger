@@ -253,6 +253,11 @@ test('CSV export has a header and one row per entity', () => {
   assert.equal(daily[0], 'key,calls,inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens,totalTokens,reasoningTokens')
   assert.equal(daily.length, 4) // header + 3 days
   assert.ok(daily[1].startsWith('2026-01-15,3,'))
+  // The bytes carry the byte-order mark, so a spreadsheet reads the file as UTF-8
+  // rather than as the system code page — the difference between a Chinese session
+  // name and mojibake. (`trim()` strips it from a string, which is why this asserts on
+  // the file's first bytes instead.)
+  assert.equal(Buffer.from(ledger.toCsv('daily'), 'utf8').subarray(0, 3).toString('hex'), 'efbbbf')
 
   assert.equal(ledger.toCsv('sessions').trim().split('\r\n').length, 2)
   assert.equal(ledger.toCsv('models').trim().split('\r\n').length, 2)

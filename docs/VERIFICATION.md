@@ -7,7 +7,7 @@ point of this file is to be checkable and to state its own gaps.
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-09-12 (0.7.0, 0.6.0 and 0.5.0; the 0.4.0 runs below were on 2026-09-10) |
+| Date | 2026-09-12 (0.7.1, 0.7.0, 0.6.0 and 0.5.0; the 0.4.0 runs below were on 2026-09-10) |
 | OS | Windows (win32) |
 | Node.js | v24.18.0 |
 | DSH | 0.1.2-rc.1 (packaged desktop build) |
@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm run test:single-process` — **282 tests in 14 files, all passing**, with no
+`npm run test:single-process` — **283 tests in 14 files, all passing**, with no
 dependencies to install and no network. (That is the same suite as `npm test`;
 the per-file process isolation Node uses by default cannot `spawn` on this
 machine, so the isolation-free runner is the one used here.) The
@@ -25,12 +25,12 @@ reach the real one:
 
 | File | Tests | Covers |
 | --- | --- | --- |
-| `test/ledger.test.mjs` | 28 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, the peak/off-peak split and the usage cross table, workspace capture, the session title DSH gives a session (last one wins, blank and non-string titles ignored, survives a restart), and a property-style cross-check against an independent naive implementation over 25 generated logs |
+| `test/ledger.test.mjs` | 28 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV — including the byte-order mark on its bytes — the peak/off-peak split and the usage cross table, workspace capture, the session title DSH gives a session (last one wins, blank and non-string titles ignored, survives a restart), and a property-style cross-check against an independent naive implementation over 25 generated logs |
 | `test/cli.test.mjs` | 13 | rebuild/audit/rebuild-write/export over synthetic homes, pending-vs-stale classification, tamper detection, exit codes, torn logs |
 | `test/plugin.test.mjs` | 21 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, the working directory read from the session header rather than from the sequenced events, `/tokens` variants, degraded services, config overrides, all three routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
 | `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
-| `test/bill.test.mjs` | 24 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by vendor/model/workspace/session with a session labelled `workspace/title` and a model labelled `vendor/model`, each range including `today` and "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers, a plan allocated across rows so that every grouping's rows sum to its own total, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, and the CSV |
+| `test/bill.test.mjs` | 25 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by provider/model/workspace/session with a session labelled `workspace/title` and a model labelled by the route it recorded, each range including `today` and "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers, a plan allocated across rows so that every grouping's rows sum to its own total, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, the CSV's shape **and its byte-order mark**, and a Chinese session name surviving the file byte for byte |
 | `test/route.test.mjs` | 40 | all three routes: the loopback and origin guard, unsupported methods, the bill's grouping and range lists with their fallbacks (one section per request, twenty for an export), the CSV download and its filename, the overview's per-period costs and its degradation when there are no prices, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 paths |
 | `test/rates.test.mjs` | 27 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, the adopt/keep decision, and the input validator |
 | `test/rates-service.test.mjs` | 13 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
@@ -847,6 +847,39 @@ The bucket is now translated, and a bucket with no tokens anywhere in the payloa
 left out of the bars and the key. Asserted both ways in the render tests: three keys
 when nothing wrote cache, four (with the fourth named and coloured) when the payload
 has cache-write tokens.
+
+### The exported CSV was mojibake in Excel, 0.7.1
+
+Reported as `.dsh/缂栧啓缁熻dsh token鐢ㄩ噺鎻掍欢` for a session named
+`.dsh/编写统计dsh token用量插件`. The diagnosis is arithmetic rather than opinion: `编写`
+in UTF-8 is `e7 bc 96 e5 86 99`, and those six bytes read as GBK are `缂栧啓`, so the
+file was always UTF-8 and the reader was guessing. It was guessing because the file
+had no byte-order mark.
+
+Before and after, on the bytes rather than the text (the same ledger, the same bill,
+written by the same code path):
+
+```
+before   first 12 bytes: 64 69 6d 65 6e 73 69 6f 6e 2c 72 61   -> "dimension,ra…"
+after    first 12 bytes: ef bb bf 64 69 6d 65 6e 73 69 6f 6e   -> BOM, then the header
+```
+
+And through a real host — the export fetched over HTTP from a DSH web server holding
+a real ledger, written to disk and inspected as bytes:
+
+```
+GET /api/token-ledger/bill?by=session,vendor&range=all&format=csv
+  -> 9,183 bytes, first six bytes ef bb bf 64 69 6d, text/csv; charset=utf-8
+  a row: session,all,torchv-master/在Docker中部署MySQL和Redis,975,37890752,…
+    read as UTF-8: torchv-master/在Docker中部署MySQL和Redis
+    read as GBK:   torchv-master/鍦―ocker涓儴缃睲ySQL鍜孯edis
+```
+
+The second line is the reported defect, reproduced from the same bytes: the mark is
+what tells the reader which of those two readings is the intended one. The CLI's
+`export` tables carry the same mark for the same reason, and both writers are tested
+on their **bytes**, because `trim()` strips a byte-order mark from a string and a mark
+no reader sees fixes nothing.
 
 ### What could not be verified locally, and why
 

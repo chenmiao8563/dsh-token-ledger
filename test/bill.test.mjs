@@ -16,6 +16,7 @@ import {
   BILL_DIMENSIONS,
   BILL_RANGES,
   BILL_SECTIONS,
+  CSV_BOM,
   billToCsv,
   buildBill,
   buildBillSections,
@@ -313,7 +314,12 @@ test('without a rate the bill stays in dollars rather than mixing units', () => 
 test('the CSV carries the bill, with the currency on every row and a total per section', () => {
   const bill = buildBill({ snapshot: snapshot(), catalogue: catalogue(), by: 'vendor', range: 'month', now: SEPTEMBER })
   const csv = billToCsv(bill)
-  const lines = csv.trim().split('\r\n')
+  // The bytes, not the string: a mark that only survives in a trimmed string is a
+  // mark no reader ever sees, and without it Excel reads this file as the system code
+  // page — a Chinese name arrives as mojibake.
+  assert.equal(Buffer.from(csv, 'utf8').subarray(0, 3).toString('hex'), 'efbbbf', 'the export starts with a UTF-8 byte-order mark')
+  assert.equal(csv.charCodeAt(0), 0xfeff)
+  const lines = csv.replace(/^\ufeff/, '').trim().split('\r\n')
   assert.equal(lines[0], 'dimension,range,group,calls,cacheReadInput,uncachedInput,output,cacheWriteInput,cacheHitRate,cost,currency,billing,usagePricedCost')
   assert.equal(lines.length, bill.rows.length + 2, 'a header, every row, and a total')
   for (const line of lines.slice(1)) assert.ok(line.includes(',CNY'), `no currency on: ${line}`)
@@ -328,6 +334,29 @@ test('the CSV carries the bill, with the currency on every row and a total per s
   assert.equal(deepseek.split(',')[5], '2000000', 'uncached input')
   // For a pay-as-you-go row the usage-priced cost is the cost.
   assert.equal(deepseek.split(',')[9], deepseek.split(',')[12])
+})
+
+test('a name in Chinese survives the CSV byte for byte', () => {
+  // The reported defect: Excel showed `.dsh/缂栧啓缁熻dsh token鐢ㄩ噺鎻掍欢` for a
+  // session row, which is UTF-8 read as GBK. The bytes were never wrong — the file was
+  // missing the three bytes that tell a reader which encoding it is.
+  const bill = buildBillSections({
+    snapshot: snapshot({ sessions: [{ sessionId: 's1', cwd: 'D:\\proj', title: '编写统计dsh token用量插件', calls: 1 }] }),
+    catalogue: catalogue(),
+    dims: ['session'],
+    ranges: ['month'],
+    now: SEPTEMBER,
+  })
+  const csv = billToCsv(bill)
+  const bytes = Buffer.from(csv, 'utf8')
+  assert.equal(bytes.subarray(0, 3).toString('hex'), 'efbbbf')
+  const text = bytes.toString('utf8')
+  assert.ok(text.includes('编写统计dsh token用量插件'), 'the name is intact in the file')
+  // What the reader would have made of the same bytes without the mark: the mojibake
+  // in the report. Asserting it documents the failure, it is not the desired state.
+  const asGbk = new TextDecoder('gbk').decode(Buffer.from('编写统计', 'utf8'))
+  assert.notEqual(asGbk, '编写统计')
+  assert.ok(asGbk.startsWith('缂栧啓'), asGbk)
 })
 
 test('every section totals separately, because ranges overlap', () => {

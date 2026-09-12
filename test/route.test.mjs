@@ -673,6 +673,10 @@ test('format=csv returns a downloadable attachment, not JSON', () => {
   assert.equal(lines.length, 3, 'a header, the one vendor and the total')
   assert.ok(lines[0].startsWith('dimension,range,group,'))
   assert.ok(lines.at(-1).startsWith('vendor,month,TOTAL,'))
+  // The served body is UTF-8 and starts with the mark that says so, or the browser
+  // saves a file Excel will open in the system code page.
+  assert.equal(Buffer.from(res.body, 'utf8').subarray(0, 3).toString('hex'), 'efbbbf')
+  assert.equal(res.headers['content-length'], Buffer.byteLength(res.body), 'the length counts the mark')
 
   // The attachment name follows what was asked for, and a whole export says so.
   const bySession = call(billRoute(), makeBillReq({ url: `${BILL_PATH}?format=csv&by=session&range=today` }))

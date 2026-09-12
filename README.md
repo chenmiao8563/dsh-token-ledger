@@ -272,7 +272,10 @@ period**, so this month by workspace can sit above today by model.
 - **One export for all of it, top right.** CSV or JSON, carrying every grouping over
   every period, with the currency on every row and **one `TOTAL` per section**. There
   is deliberately no grand total: the periods overlap, and adding today to this week
-  to this month would count the same tokens four times.
+  to this month would count the same tokens four times. The CSV starts with a UTF-8
+  byte-order mark, without which Excel opens it in the system code page and a session
+  named `编写统计` arrives as `缂栧啓缁熻`; the JSON export has none, because a JSON
+  parser rejects a leading mark.
 - **By plan, without double counting.** `subscriptions` in the config takes monthly
   plans, and the fee is spread over the days the bill covers: the 1st-to-10th of a
   ¥199 month is ¥66.33, not ¥199. A vendor on a plan is billed its plan and the usage
