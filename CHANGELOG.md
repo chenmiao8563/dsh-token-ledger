@@ -152,10 +152,12 @@ Four things only a person reading the rendered table could have asked for:
 
 ### Fixed
 
-- **Google's group now carries the Gemini spark rather than the Google "G".** Every
-  model in that group is a Gemini, and this table prices models: the letter named
-  the company, the shape names what is being priced. The mark is Simple Icons'
-  `googlegemini` file, bundled whole, in the purple that file publishes.
+- **Google's group now carries the Gemini spark rather than the Google "G", in its
+  real colours.** Every model in that group is a Gemini, and this table prices
+  models: the letter named the company, the shape names what is being priced. The
+  mark is Google's own `gemini_sparkle_v002` SVG from `gstatic.com`, bundled whole,
+  so it keeps the gradient that mark actually is — `#9168C0 → #5684D1 → #1BA1E3`.
+  A flat colour from an icon set was the wrong answer to what the mark looks like.
 - **Three vendor marks rendered wrong, and the cause was this package's own
   extraction.** The client kept each mark's `<path d>` plus a colour, which silently
   discarded everything else a mark can need. Tencent's sits inside a flipped
