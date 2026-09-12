@@ -77,10 +77,13 @@ function makeCtx(services = {}) {
  * @param {object[]} [options.liveSessions] - sessions `ctx.get('sessions')` should list.
  * @param {object} [options.config] - plugin config.
  * @param {object} [options.extraServices] - further services, e.g. a `webServer`.
- * @returns {Promise<{ harness: object, home: string, commands: object[], cleanup: () => void }>} the harness.
+ * @param {(url: string, options: object) => Promise<object>} [options.fetchImpl] - what the pricing refresh should see.
+ * @param {string} [options.home] - an existing DSH home to reuse, so a second run can be tested against the first one's files. The caller then owns it.
+ * @returns {Promise<{ harness: object, home: string, commands: object[], fetches: object[], settle: () => Promise<void>, cleanup: () => void }>} the harness.
  */
-async function mount({ persistence, liveSessions = [], config, extraServices = {} } = {}) {
-  const home = mkdtempSync(join(tmpdir(), 'token-ledger-plugin-'))
+async function mount({ persistence, liveSessions = [], config, extraServices = {}, fetchImpl, home: givenHome } = {}) {
+  const ownsHome = givenHome === undefined
+  const home = givenHome ?? mkdtempSync(join(tmpdir(), 'token-ledger-plugin-'))
 
   const services = {}
   if (persistence !== undefined) services.sessionPersistence = persistence
@@ -97,11 +100,23 @@ async function mount({ persistence, liveSessions = [], config, extraServices = {
   services.commands = commands
   Object.assign(services, extraServices)
 
+  // The pricing refresh fetches on startup, so the network is replaced for the
+  // whole mount. A test that reached the real internet would be slow, flaky, and
+  // dependent on a firewall; this way the offline path is what gets exercised,
+  // which is also the path a user behind one of those firewalls sees.
+  const previousFetch = globalThis.fetch
+  const fetches = []
+  globalThis.fetch = (url, options) => {
+    fetches.push({ url: String(url), options })
+    if (typeof fetchImpl === 'function') return fetchImpl(String(url), options)
+    return Promise.resolve({ ok: false, status: 599, statusText: 'offline in tests', text: () => Promise.resolve('') })
+  }
+
   const previousHome = process.env.DSH_HOME
   process.env.DSH_HOME = home
   const harness = makeCtx(services)
   apply(harness.ctx, config)
-  // Let the fire-and-forget backfill settle.
+  // Let the fire-and-forget backfill and pricing refresh settle.
   const settle = async () => {
     for (let index = 0; index < 20; index += 1) await new Promise((resolve) => setImmediate(resolve))
   }
@@ -111,11 +126,14 @@ async function mount({ persistence, liveSessions = [], config, extraServices = {
     harness,
     home,
     commands: registeredCommands,
+    fetches,
     settle,
     cleanup: () => {
       if (previousHome === undefined) delete process.env.DSH_HOME
       else process.env.DSH_HOME = previousHome
-      rmSync(home, { recursive: true, force: true })
+      if (previousFetch === undefined) delete globalThis.fetch
+      else globalThis.fetch = previousFetch
+      if (ownsHome) rmSync(home, { recursive: true, force: true })
     },
   }
 }
@@ -309,7 +327,7 @@ test('a fork carrying its boundary marker is cut after it', async () => {
   }
 })
 
-test('the settings page route is registered and logged when a web server exists', async () => {
+test('both settings page routes are registered and logged when a web server exists', async () => {
   const routes = []
   const disposed = []
   const mounted = await mount({
@@ -323,23 +341,117 @@ test('the settings page route is registered and logged when a web server exists'
     },
   })
   try {
-    assert.equal(routes.length, 1, 'exactly one route should be registered')
-    assert.equal(routes[0].kind, 'exact')
-    assert.equal(routes[0].path, '/api/token-ledger/summary')
-    assert.equal(typeof routes[0].handler, 'function')
+    assert.equal(routes.length, 2, 'the overview and the rates route should both be registered')
+    assert.deepEqual(
+      routes.map((route) => [route.kind, route.path]),
+      [
+        ['exact', '/api/token-ledger/summary'],
+        ['exact', '/api/token-ledger/rates'],
+      ],
+    )
+    for (const route of routes) assert.equal(typeof route.handler, 'function')
     // The log line is what the settings page cannot tell the user: from the
     // browser, "no web server" and "registration failed" look the same.
     assert.ok(
       mounted.harness.logs.some(
-        ([level, args]) => level === 'info' && String(args[0]).includes('settings page route ready'),
+        ([level, args]) => level === 'info' && String(args[0]).includes('settings page routes ready'),
       ),
       JSON.stringify(mounted.harness.logs),
     )
-    // Disposing the plugin must hand the route back.
+    // Disposing the plugin must hand both routes back.
     await mounted.harness.dispose()
-    assert.deepEqual(disposed, ['/api/token-ledger/summary'])
+    assert.deepEqual(disposed.sort(), ['/api/token-ledger/rates', '/api/token-ledger/summary'])
   } finally {
     mounted.cleanup()
+  }
+})
+
+test('the startup refresh is attempted once and a blocked network is not an error', async () => {
+  const mounted = await mount()
+  try {
+    assert.equal(mounted.fetches.length, 2, 'one catalogue fetch and one rate fetch')
+    for (const call of mounted.fetches) {
+      assert.match(String(call.options?.headers?.accept ?? ''), /json/)
+      assert.ok(call.options?.signal !== undefined, 'a refresh that hangs must be able to abort')
+    }
+    // The failure is recorded, not thrown: the host has to keep running on a
+    // machine whose firewall answers nothing.
+    assert.equal(
+      mounted.harness.logs.some(([, args]) => String(args[0]).includes('rates refresh')),
+      true,
+      'a refresh attempt should be logged with its outcome',
+    )
+    const stored = JSON.parse(readFileSync(ledgerPaths(mounted.home, {}).rates, 'utf8'))
+    assert.equal(stored.lastRefresh.catalogue.startsWith('failed'), true)
+    assert.equal(stored.catalogue, undefined)
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+test('rates: false leaves hand-entered prices as the only source', async () => {
+  const mounted = await mount({ config: { rates: false } })
+  try {
+    assert.equal(mounted.fetches.length, 0, 'a strictly offline host must make no request at all')
+    assert.ok(
+      mounted.harness.logs.some(([, args]) => String(args[0]).includes('pricing refresh is disabled')),
+      JSON.stringify(mounted.harness.logs),
+    )
+  } finally {
+    mounted.cleanup()
+  }
+})
+
+test('a cached catalogue is still served to a later host with no network at all', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'token-ledger-cache-'))
+  const catalogue = {
+    data: [
+      { id: 'acme/two', name: 'Acme Two', created: 200, pricing: { prompt: '0.000002', completion: '0.000008' } },
+      { id: 'acme/one', name: 'Acme One', created: 100, pricing: { prompt: '0.000001', completion: '0.000004' } },
+    ],
+  }
+  const fx = { base_code: 'USD', rates: { CNY: 7.25 }, time_last_update_unix: 1_700_000_000 }
+  const served = (route) => {
+    const res = { status: 0, body: '', writeHead(status) { this.status = status }, end(text) { this.body = text ?? '' } }
+    return Promise.resolve(route.handler({ method: 'GET', headers: {}, socket: { remoteAddress: '127.0.0.1' } }, res)).then(() => res)
+  }
+
+  // First host: online, so the prices are fetched and cached beside the ledger.
+  const online = await mount({
+    home,
+    extraServices: { webServer: { register: () => () => {} } },
+    fetchImpl: (url) =>
+      Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(String(url).includes('openrouter') ? catalogue : fx)) }),
+  })
+  try {
+    const stored = JSON.parse(readFileSync(ledgerPaths(home, {}).rates, 'utf8'))
+    assert.equal(stored.catalogue.vendors[0].vendor, 'acme')
+    assert.equal(stored.catalogue.vendors[0].models[0].id, 'acme/two', 'the newest model comes first')
+    assert.equal(stored.catalogue.vendors[0].models[0].prices.input, 2, 'USD per million tokens')
+    assert.equal(stored.catalogue.vendors[0].models[0].prices.cacheRead, null)
+    assert.equal(stored.fx.rate, 7.25)
+  } finally {
+    online.cleanup()
+  }
+
+  const routes = []
+  const offline = await mount({
+    home,
+    extraServices: { webServer: { register: (route) => routes.push(route) } },
+  })
+  try {
+    const res = await served(routes[1])
+    assert.equal(res.status, 200)
+    const body = JSON.parse(res.body)
+    assert.equal(body.catalogue.available, true, 'the cached catalogue survives a host with no network')
+    assert.equal(body.vendors[0].models[0].prices.input, 2)
+    assert.equal(body.fx.rate, 7.25)
+    // ...and the failed refresh is visible as an age, not as an empty page.
+    assert.equal(typeof body.catalogue.ageMs, 'number')
+    assert.match(body.lastRefresh.catalogue, /^failed/)
+  } finally {
+    offline.cleanup()
+    rmSync(home, { recursive: true, force: true })
   }
 })
 

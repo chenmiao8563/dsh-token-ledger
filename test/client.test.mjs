@@ -570,3 +570,295 @@ test('a failed fetch is reported through the state setter', async () => {
     globalThis.fetch = realFetch
   }
 })
+
+/* ------------------------------------------------------------------- rates -- */
+
+/**
+ * A ready rates payload.
+ *
+ * The fixture is built so every claim the view makes has one unambiguous
+ * answer: one vendor with a fetched row and a hand-entered row, one vendor that
+ * exists only because someone typed it, prices spanning five orders of
+ * magnitude, and a rate that was fetched rather than typed.
+ *
+ * @param {object} [overrides] - fields to replace.
+ * @returns {object} the payload.
+ */
+function ratesPayload(overrides = {}) {
+  const fetchedAt = new Date(2026, 2, 10, 12, 0, 0).getTime()
+  return {
+    plugin: 'token-ledger',
+    generatedAt: fetchedAt,
+    refreshIntervalMs: 1_800_000,
+    perVendor: 3,
+    currency: 'USD',
+    quote: 'CNY',
+    catalogue: {
+      available: true,
+      fetchedAt,
+      ageMs: 95 * 60 * 1000,
+      source: 'https://openrouter.ai/api/v1/models',
+      totalAvailable: 445,
+      modelCount: 6,
+      vendorCount: 2,
+    },
+    fx: { available: true, rate: 7.1234, base: 'USD', quote: 'CNY', source: 'https://open.er-api.com/v6/latest/USD', fetchedAt, ageMs: 95 * 60 * 1000, overridden: false },
+    overriddenModels: 1,
+    lastRefresh: { at: fetchedAt, ageMs: 60_000, catalogue: 'ok (6 models, 2 vendors)', fx: 'ok (1 USD = 7.1234 CNY)' },
+    vendors: [
+      {
+        vendor: 'acme',
+        modelCount: 12,
+        models: [
+          {
+            id: 'acme/flagship',
+            name: 'Acme Flagship',
+            vendor: 'acme',
+            created: 200,
+            contextLength: 128000,
+            prices: { input: 2.5, output: 75, cacheRead: 0.15, cacheWrite: 0.0002 },
+            source: 'manual',
+          },
+          {
+            id: 'acme/mini',
+            name: 'Acme Mini',
+            vendor: 'acme',
+            created: 100,
+            contextLength: 32000,
+            prices: { input: 0.25, output: 1, cacheRead: null, cacheWrite: null },
+            source: 'fetched',
+          },
+        ],
+      },
+      {
+        vendor: '',
+        modelCount: 1,
+        manualOnly: true,
+        models: [
+          { id: 'deepseek/deepseek-chat', name: 'deepseek/deepseek-chat', vendor: '', created: null, contextLength: null, prices: { input: 0.27, output: 1.1, cacheRead: null, cacheWrite: null }, source: 'manual' },
+        ],
+      },
+    ],
+    ...overrides,
+  }
+}
+
+/**
+ * Render the section on the rates view with a given state.
+ *
+ * The hook order is range, view, overview state, tab, rates state.
+ *
+ * @param {object} module - the loaded client module.
+ * @param {object} state - the rates fetch state.
+ * @returns {{ tree: unknown, text: string[] }} the render.
+ */
+function renderRates(module, state) {
+  const priming = module.priming
+  priming.length = 0
+  priming.push(DEFAULT, DEFAULT, { status: 'ready', data: payload(), error: null }, 'rates', state)
+  const tree = expand(module.__section({ t: fakeT() }))
+  priming.length = 0
+  return { tree, text: collectText(tree) }
+}
+
+test('the section offers a tab per view and shows the overview first', () => {
+  const { module } = loadWithSection()
+  const priming = module.priming
+  priming.length = 0
+  priming.push(DEFAULT, DEFAULT, { status: 'ready', data: payload(), error: null })
+  const tree = expand(module.__section({ t: fakeT() }))
+  priming.length = 0
+  const text = collectText(tree)
+  assert.ok(hasText(text, 'tabOverview'), 'the overview tab is offered')
+  assert.ok(hasText(text, 'tabRates'), 'the rates tab is offered')
+  // The overview is what a reader lands on: its own title, not the rates one.
+  assert.ok(hasText(text, 'title'))
+  assert.ok(!hasText(text, 'ratesTitle'), 'the rates view is not rendered until it is chosen')
+})
+
+test('the rates view shows the live rate, its source and the per-million unit', () => {
+  const { module } = loadWithSection()
+  const { text } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  assert.ok(hasText(text, 'fxTitle'))
+  assert.ok(hasText(text, '1 USD ='), 'the pair is written out')
+  assert.ok(hasText(text, '7.1234'), 'the rate is shown to four decimals')
+  assert.ok(hasText(text, 'CNY'))
+  assert.ok(hasText(text, 'open.er-api.com'), 'the source host is named')
+  assert.ok(hasText(text, 'fxHint'), 'the page says it computes no cost')
+  assert.ok(hasText(text, 'perMillion'), 'prices are labelled per million tokens')
+})
+
+test('prices follow their magnitude instead of a fixed number of decimals', () => {
+  const { module } = loadWithSection()
+  const { text } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  assert.ok(hasText(text, '$75'), 'a whole price loses its pointless zeros')
+  assert.ok(hasText(text, '$2.5'))
+  assert.ok(hasText(text, '$0.25'))
+  assert.ok(hasText(text, '$0.15'))
+  assert.ok(hasText(text, '$0.0002'), 'a hundredth of a cent is not rounded away')
+  // An unpublished price is a dash, which is not the same claim as free.
+  assert.ok(hasText(text, '—'))
+})
+
+test('each vendor group lists its models with a column per price', () => {
+  const { module } = loadWithSection()
+  const { tree, text } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  assert.equal(countByExactClass(tree, 'tl-vendor'), 2)
+  assert.equal(countByClass(tree, 'tl-rate-row'), 3)
+  assert.equal(countByExactClass(tree, 'tl-rate-head'), 2, 'each group carries its own column header')
+  // Four price columns per header row: input, output, cache read, cache write.
+  const header = findByClass(tree, 'tl-rate-head')
+  assert.equal(header.children.length, 6, 'model, four prices, actions')
+  for (const key of ['priceInput', 'priceOutput', 'priceCacheRead', 'priceCacheWrite']) {
+    assert.ok(hasText(text, key), `missing ${key}`)
+  }
+  assert.ok(hasText(text, 'acme'))
+  assert.ok(hasText(text, 'Acme Flagship'))
+  assert.ok(hasText(text, 'deepseek/deepseek-chat'))
+  // The vendor-less group is named after what it is rather than left blank.
+  assert.ok(hasText(text, 'manualGroup'))
+})
+
+test('a hand-entered row is marked, and only such a row can be cleared', () => {
+  const { module } = loadWithSection()
+  const { tree, text } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  assert.equal(countByClass(tree, 'tl-badge'), 3, 'the rate badge plus one per hand-entered row')
+  const manualRows = []
+  const walk = (node) => {
+    if (node === null || typeof node !== 'object') return
+    if (Array.isArray(node)) return node.forEach(walk)
+    if (node.props?.['data-manual'] === 'true') manualRows.push(node)
+    walk(node.children ?? [])
+  }
+  walk(tree)
+  assert.equal(manualRows.length, 2, 'the typed price and the manual-only vendor row')
+  assert.ok(hasText(text, 'edit'), 'every row can be edited')
+  assert.ok(hasText(text, 'clear'), 'a hand-entered row can be handed back')
+})
+
+test('an offline host is told so, and offered hand entry instead', () => {
+  const { module } = loadWithSection()
+  const offline = ratesPayload({
+    catalogue: { available: false, fetchedAt: null, ageMs: null, source: 'https://openrouter.ai/api/v1/models', totalAvailable: null, modelCount: 0, vendorCount: 0 },
+    fx: { available: false, rate: null, base: 'USD', quote: 'CNY', source: 'https://open.er-api.com/v6/latest/USD', fetchedAt: null, ageMs: null, overridden: false },
+    vendors: [],
+    lastRefresh: { at: Date.now(), ageMs: 1000, catalogue: 'failed (timeout after 20000ms)', fx: 'failed (getaddrinfo ENOTFOUND)' },
+  })
+  const { text } = renderRates(module, { status: 'ready', data: offline, error: null })
+  assert.ok(hasText(text, 'neverFetched'))
+  assert.ok(hasText(text, 'neverFetchedHint'))
+  assert.ok(hasText(text, 'ratesEmpty'))
+  assert.ok(hasText(text, 'fxNone'), 'the rate is marked as never fetched')
+  // The manual form is present regardless: it is the offline path, not an error
+  // state, and the page must be usable with no network at all.
+  assert.ok(hasText(text, 'manualFormTitle'))
+  assert.ok(hasText(text, 'modelId'))
+})
+
+test('the manual entry form names every field it can set', () => {
+  const { module } = loadWithSection()
+  const { tree } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
+  const form = findByClass(tree, 'tl-manual-form')
+  assert.ok(form !== null, 'the rates view offers hand entry')
+  assert.equal(countByExactClass(form, 'tl-field'), 5, 'a model id and four prices')
+  const text = collectText(form)
+  assert.ok(hasText(text, 'modelId'))
+  for (const key of ['priceInput', 'priceOutput', 'priceCacheRead', 'priceCacheWrite']) {
+    assert.ok(hasText(text, key), `missing ${key} in the manual form`)
+  }
+})
+
+test('a stale rates read keeps showing the previous payload with a note', () => {
+  const { module } = loadWithSection()
+  const { text } = renderRates(module, { status: 'stale', data: ratesPayload(), error: 'network' })
+  assert.ok(hasText(text, 'stale'))
+  assert.ok(hasText(text, '7.1234'), 'the previous payload is still rendered')
+})
+
+test('an unreachable rates route explains itself instead of throwing', () => {
+  const { module } = loadWithSection()
+  const { text } = renderRates(module, { status: 'error', data: null, error: 'HTTP 404' })
+  assert.ok(hasText(text, 'unavailable'))
+  assert.ok(hasText(text, 'ratesUnavailableReason'))
+  assert.ok(hasText(text, 'HTTP 404'))
+})
+
+test('a save reports its outcome, and a failure reports why', () => {
+  const { module } = loadWithSection()
+  const saved = renderRates(module, { status: 'ready', data: ratesPayload(), error: null, notice: { ok: true, text: 'saved' } })
+  assert.ok(hasText(saved.text, 'saved'))
+  const failed = renderRates(module, {
+    status: 'ready',
+    data: ratesPayload(),
+    error: null,
+    notice: { ok: false, text: 'saveFailed: fx.rate must be a positive number' },
+  })
+  assert.ok(hasText(failed.text, 'saveFailed'))
+  assert.ok(hasText(failed.text, 'fx.rate must be a positive number'))
+})
+
+test('a rates payload missing every optional field still renders', () => {
+  const { module } = loadWithSection()
+  const { text } = renderRates(module, { status: 'ready', data: { plugin: 'token-ledger' }, error: null })
+  assert.ok(hasText(text, 'fxTitle'))
+  assert.ok(hasText(text, '—'))
+  assert.ok(hasText(text, 'ratesEmpty'))
+})
+
+test('prices are fetched only when the rates view is opened', () => {
+  const { module, reactEffects } = loadWithSection()
+  reactEffects.length = 0
+  // The overview render registers both effects; only the first should fetch.
+  render(module, { status: 'loading', data: null, error: null })
+  assert.equal(reactEffects.length, 2)
+  const calls = []
+  const realFetch = globalThis.fetch
+  let intervals = 0
+  const realSetInterval = globalThis.setInterval
+  globalThis.fetch = (url, options) => {
+    calls.push({ url, options })
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(ratesPayload()) })
+  }
+  globalThis.setInterval = (handler, ms) => {
+    intervals += 1
+    return realSetInterval(handler, ms)
+  }
+  try {
+    // On the overview the second effect must not read anything: the catalogue is
+    // a couple of hundred rows and a reader who stays here should not pay for it.
+    assert.equal(reactEffects[1](), undefined, 'no cleanup is needed when nothing was started')
+    assert.deepEqual(calls, [])
+    assert.equal(intervals, 0)
+  } finally {
+    globalThis.fetch = realFetch
+    globalThis.setInterval = realSetInterval
+  }
+
+  // On the rates view the same effect reads the documented endpoint and polls.
+  reactEffects.length = 0
+  const priming = module.priming
+  priming.length = 0
+  priming.push(DEFAULT, DEFAULT, { status: 'ready', data: payload(), error: null }, 'rates', { status: 'loading', data: null, error: null })
+  globalThis.fetch = (url, options) => {
+    calls.push({ url, options })
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(ratesPayload()) })
+  }
+  globalThis.setInterval = (handler, ms) => {
+    intervals += 1
+    return realSetInterval(handler, ms)
+  }
+  try {
+    expand(module.__section({ t: fakeT() }))
+    assert.equal(reactEffects.length, 2)
+    const dispose = reactEffects[1]()
+    assert.deepEqual(calls.map((call) => call.url), ['/api/token-ledger/rates'])
+    assert.equal(calls[0].options.cache, 'no-store')
+    assert.equal(intervals, 1, 'the rates view polls for changes made by the host timer')
+    assert.equal(typeof dispose, 'function')
+    dispose()
+  } finally {
+    priming.length = 0
+    globalThis.fetch = realFetch
+    globalThis.setInterval = realSetInterval
+  }
+})

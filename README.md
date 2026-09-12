@@ -30,6 +30,11 @@ scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
 If you only want a pretty chart, there are a dozen plugins for that. This one is
 for when you need to *defend* the number.
 
+Since 0.4 the settings page also has a **Rates** tab: a price table for each
+vendor's newest models and the live USD/CNY rate. It is a reference table — see
+[Settings page](#settings-page) — and it deliberately stops short of turning
+tokens into money.
+
 ## Why it installs where others do not
 
 | Property | Why it matters |
@@ -146,7 +151,10 @@ audit useless. The ledger's own `updatedAt` settles it:
 
 ## Settings page
 
-The browser half adds a **Token ledger** section to the settings sidebar:
+The browser half adds a **Token ledger** section to the settings sidebar, with two
+tabs: **Overview** and **Rates**.
+
+### Overview
 
 - **Range totals** for this month, this year and the last 7 days — total tokens,
   cache hit rate, call count, and the bucket breakdown behind them. The cache hit
@@ -159,19 +167,49 @@ The browser half adds a **Token ledger** section to the settings sidebar:
   flatten the rest. The month view also carries a summary beside the grid: the
   busiest day, the lightest weekday and the weekday that ran latest (compared by
   the clock time of the day's last call).
-- **Per model** totals, each with its own hit rate.
+- **Per model** totals, each with its own hit rate and a stacked bar showing where
+  the tokens went.
 
-The page reads one read-only route, `GET /api/token-ledger/summary`, and polls it
-once a minute. The route refuses a non-loopback peer, so it stays private even
-if the web server is bound to `0.0.0.0`.
+### Rates
+
+- **The USD/CNY rate** in its own box, to four decimals, with its source and how
+  long ago it was fetched. It is shown for reference: this page computes **no
+  cost**, and it says so on the page.
+- **Each vendor's newest models**, two to three per vendor, with the published
+  price per million tokens for input, output, cache read and cache write. Prices
+  are USD; a price the vendor does not publish is a dash, which is a different
+  claim from "free".
+- **Hand entry.** Any price, and the rate itself, can be typed over. A typed value
+  outranks every later fetch, is marked as hand-entered in the table, and can be
+  handed back to the fetched value or cleared. There is also a free-form entry row
+  for a model that no fetch has described.
+- **Offline is a state, not an error.** The host refreshes prices and the rate
+  every 30 minutes. A failed refresh keeps the last good result and reports the
+  attempt as failed, so a firewalled machine sees the last known prices with a
+  visible age rather than a blank page. A host that has never reached the network
+  says so and points at the hand-entry form; a host configured with
+  `rates: false` makes no request at all and is a price list you maintain.
+
+The page reads two loopback-only routes: `GET /api/token-ledger/summary` for the
+overview and `GET|POST /api/token-ledger/rates` for prices and the rate, polling
+the overview once a minute and prices when the rates tab is open. Both refuse a
+non-loopback peer, so they stay private even if the web server is bound to
+`0.0.0.0`. The write half additionally requires a JSON content type — a
+cross-origin form cannot send one — and caps the body at 256 KiB.
+
+It needs a profile with a web server (the `web` or `desktop` profile). Without one,
+`/tokens` and the CLI still work, and the section says so instead of failing. Note
+that hand-entered prices are entered **on that page**: there is no command-line
+equivalent yet, so a headless profile can read the usage ledger but cannot type a
+price.
 
 It needs a profile with a web server (the `web` or `desktop` profile). Without one,
 `/tokens` and the CLI still work, and the section says so instead of failing.
 
-The overview is deliberately **not** published through a settings namespace. That
-would need a schema — a real dependency, and this package has none — and would
-rewrite `settings.yaml` on every debounce with data that is derived and
-reproducible. The ledger file stays the only store of record.
+Neither view is published through a settings namespace. That would need a schema —
+a real dependency, and this package has none — and would rewrite `settings.yaml` on
+every debounce with data that is derived and reproducible. The ledger file stays the
+only store of record; prices live in `rates.json` beside it.
 
 ## Configuration
 
@@ -182,17 +220,32 @@ Override the composition entry by its `id`:
   config:
     ledgerPath: 'D:/dsh/ledger.json'   # default: <DSH_HOME>/token-ledger/ledger.json
     backfill: false                     # default: true — fold stored history on startup
+    rates: false                        # default: true — false makes no network request at all
+    # rates also takes an object:
+    # rates:
+    #   refreshIntervalMs: 1800000       # default: 30 minutes
+    #   perVendor: 3                     # default: 3 newest models per vendor
+    #   modelsUrl: 'https://…/models'    # default: OpenRouter's public model list
+    #   fxUrl: 'https://…/latest/USD'    # default: open.er-api.com
 ```
+
+`rates: false` disables the pricing feature's networking entirely and leaves
+hand-entered values as the only source. That is the setting a strictly offline host
+wants; the rates page still works.
 
 ## What it deliberately does not do
 
-- **No pricing.** It counts tokens; turning them into money needs a price
-  catalogue that goes stale. Pair it with a billing plugin if you want money.
+- **No cost, in money.** It counts tokens, and it shows a price table with a live
+  rate beside it, but it never multiplies one by the other. A cost number would
+  have to combine per-model token counts with the price of the route actually
+  billed, and both are approximate in ways that make the result wrong in a
+  plausible-looking way. Do that arithmetic with your own billing data.
+- **No bundled price list.** Prices are fetched, or typed by you. A price list
+  shipped inside the package would be wrong within weeks and would have to be
+  updated by a release.
 - **No model-facing tool.** A tool schema costs prompt tokens on every request
   and shifts the cache prefix — a strange thing for a token-accounting plugin to
   do. `/tokens` and the CLI cover the human cases.
-- **No UI in 0.1.0.** The host half and the CLI are the contract; a browser half
-  is planned for 0.2 as a pure addition.
 
 ## Compatibility
 
@@ -202,6 +255,10 @@ Override the composition entry by its `id`:
   `ctx.get`, `ctx.effect`, `commands.register`, and
   `sessionPersistence.list()/inspect()` — is the same across the `0.1.2` line.
 - **Profiles:** any. There is no profile-specific code.
+- **Network:** the rates tab fetches prices and the USD rate over HTTPS. This is
+  entirely optional: with no route to the internet the last fetched result is
+  still served from disk, hand-entered values still work, and `rates: false`
+  removes the requests altogether.
 
 ## Uninstall
 

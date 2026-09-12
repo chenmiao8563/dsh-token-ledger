@@ -15,14 +15,28 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm test` — 49 tests, no dependencies to install, no network:
+`npm test` — 168 tests in 11 files, no dependencies to install, no network. The
+suite replaces `globalThis.fetch` for the duration of a mount, so the pricing
+refresh is exercised against a host with no route to the internet and no test can
+reach the real one:
 
 | File | Tests | Covers |
 | --- | --- | --- |
-| `test/ledger.test.mjs` | 17 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, and a property-style cross-check against an independent naive implementation over 25 generated logs |
+| `test/ledger.test.mjs` | 21 | counting rules, replacement, fork cut, idempotency, snapshot round trip, CSV, and a property-style cross-check against an independent naive implementation over 25 generated logs |
 | `test/cli.test.mjs` | 13 | rebuild/audit/rebuild-write/export over synthetic homes, pending-vs-stale classification, tamper detection, exit codes, torn logs |
-| `test/plugin.test.mjs` | 12 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, `/tokens` variants, degraded services, config overrides |
+| `test/plugin.test.mjs` | 20 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, `/tokens` variants, degraded services, config overrides, both routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
+| `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
+| `test/route.test.mjs` | 24 | both routes: the loopback and origin guard, unsupported methods, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 path |
+| `test/rates.test.mjs` | 15 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection, variant and retired-model exclusion, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
+| `test/rates-service.test.mjs` | 9 | fetch, cache and schedule: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, and every transport fault is reported instead of thrown |
+| `test/client.test.mjs` | 28 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, and that prices are only fetched once the rates tab is open |
+| `test/client-render.test.mjs` | 13 | the same views under the real React, asserting the actual markup and that the library raises no complaint |
+| `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
+
+The React-dependent files skip with a stated reason when `react` and `react-dom`
+are not resolvable, which keeps `npm test` working from a fresh clone with no
+network.
 
 ## Evidence from real session logs
 
@@ -356,6 +370,83 @@ every bundle DSH ships, the registration is validated by the real registry, and
 the markup is asserted under the real React — but the loader and the mount are
 covered by observation rather than by a test that can run unattended.
 
+## Rates (0.4.0)
+
+Three things had to be true and are checked separately: the sources parse, the
+routes serve them, and the write path stores what it is given.
+
+### The live sources, parsed by the plugin's own code
+
+Run on Windows against the real endpoints, through `createRatesService` — not a
+reimplementation of it:
+
+```
+refresh outcome: {"catalogue":"ok (123 models, 56 vendors)","fx":"ok (1 USD = 6.725314 CNY)"}
+catalogue.totalAvailable: 445
+catalogue.vendorCount: 56
+catalogue.modelCount: 123
+cache file bytes: 53777
+```
+
+445 entries in the response selected down to **123 priced rows across 56
+vendors**, at most three per vendor, in a 53 KB cache file. Both endpoints answer
+without a key. The largest vendors by priced models were `openai` (60), `qwen`
+(51) and `google` (29), and a spot check of the first row read
+`openai/gpt-6-astra in=10 out=50 cacheRead=1 cacheWrite=12.5` — USD per million
+tokens, matching what the vendor publishes.
+
+This probe is what found the negative-price sentinel. Five entries in the live
+list carry `pricing: {prompt: "-1", completion: "-1"}` (the `openrouter/auto*`
+routers, which have no single price). A negative number is not a price and must
+not be rendered as `$0`; those rows are dropped, and after that change **no
+published row carries a price-free row at all**. 46 rows have no cache-read price,
+which is why the table renders a dash rather than inventing one.
+
+### Both routes over a real socket
+
+The host half was mounted behind a real `node:http` server (not the DSH web
+server) with the real network, then driven with `fetch`:
+
+```
+registered paths: [ '/api/token-ledger/summary', '/api/token-ledger/rates' ]
+GET summary -> 200 bytes 1350
+GET rates   -> 200 bytes 30555
+  catalogue: true 123 rows / 56 vendors of 445
+  fx: 6.725314 USD -> CNY ageMs 6033 overridden false
+  refreshIntervalMs: 1800000
+cache-control: no-store content-type: application/json; charset=utf-8
+POST rates -> 200 {"models":1,"fx":true}
+  row now: openai/gpt-6-astra {"input":1.25,"output":9.5,...} source: manual
+  fx now: 7.01 overridden: true source: manual
+POST orphan -> 200   (a hand-entered model no fetch described, published as its own group)
+fx after reset: 6.725314 overridden: false
+POST form content-type -> 415
+POST malformed json    -> 400
+POST bad value         -> 400
+POST oversized body    -> 413 {"error":"body exceeds 262144 bytes"}
+PUT rates              -> 405
+```
+
+and the host logged:
+
+```
+[token-ledger] settings page routes ready at %s and %s  /api/token-ledger/summary  /api/token-ledger/rates
+[token-ledger] rates refresh (%s): catalogue %s, fx %s   startup  ok (123 models, 56 vendors)  ok (1 USD = 6.725314 CNY)
+```
+
+This is the check that found the oversized-body behaviour: the handler used to
+destroy the request while answering, so the caller saw a connection reset instead
+of the 413 it had just written. Destroying it was the bug; the stream is now left
+alone and the status arrives as `413 {"error":"body exceeds 262144 bytes"}`.
+
+### Checked by hand
+
+The same probe drove the offline path: with the refresh forced to fail, the cached
+catalogue and rate are still served with an `ageMs` attached, `lastRefresh`
+reports `failed (…)`, and the manual entry group is published rather than
+discarded. The isolated two-mount test in `test/plugin.test.mjs` pins the same
+story on the second host with no network at all.
+
 ## Not verified
 
 Stated plainly, because a verification file that only lists successes is not
@@ -369,6 +460,23 @@ useful:
 - **Provider billing agreement.** The ledger counts what the session log
   records. It makes no claim about what a provider invoices, which can differ
   for failed, retried or partially delivered requests.
+- **The rates view in a real browser.** Both views are asserted under the real
+  React and their markup is checked, but no one has yet looked at the Rates tab in
+  a running DSH — the 0.4.0 layout, spacing and colour are verified by assertion
+  only. The 0.3.0 round of feedback came from looking at the page; this one has
+  not had that pass.
+- **The DSH web server itself.** Both routes were driven through a real
+  `node:http` server, which exercises the handlers, the guard against a real
+  `remoteAddress`, JSON serialization and the write path — but it is not DSH's own
+  web server, and its routing rules are taken from the 0.2.0 mount rather than
+  re-checked here.
+- **Price accuracy.** The tables are asserted to carry what the source published,
+  spot-checked against one vendor's published numbers. Nothing here verifies that
+  a source is correct, current, or the price a given account is actually billed.
+- **The 30-minute timer over a long run.** The interval is asserted to be
+  configured and to fire and stop under test; that it keeps working across a
+  multi-hour session, and that the host does not keep a process alive for it, is
+  asserted only by the `unref` call rather than by observation.
 
 Two items that earlier drafts of this file listed here have since been closed
 with evidence rather than removed quietly: `/tokens` answering in a live

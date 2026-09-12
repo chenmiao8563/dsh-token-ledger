@@ -59,38 +59,46 @@ function loadClient() {
 }
 
 /**
- * Render the view and report anything React complained about.
+ * Render any exported view and report anything React complained about.
  *
  * React reports invalid DOM props, bad hook usage and key problems through
  * `console.error`, so capturing it turns "it rendered" into "it rendered without
  * the library objecting", which the stand-in React cannot detect.
  *
- * @param {object} exports - the loaded client module.
+ * @param {Function} component - the exported view.
  * @param {object} props - the view props.
  * @returns {{ html: string, complaints: string[] }} the markup and React's output.
  */
-function renderView(exports, props) {
+function renderComponent(component, props) {
   const complaints = []
   const realError = console.error
   const realWarn = console.warn
   console.error = (...args) => complaints.push(args.map(String).join(' '))
   console.warn = (...args) => complaints.push(args.map(String).join(' '))
   try {
-    const html = loaded.server.renderToStaticMarkup(
-      loaded.react.createElement(exports.OverviewView, {
-        t: (key) => key,
-        range: 'month',
-        view: 'year',
-        onRange: () => {},
-        onView: () => {},
-        ...props,
-      }),
-    )
+    const html = loaded.server.renderToStaticMarkup(loaded.react.createElement(component, { t: (key) => key, ...props }))
     return { html, complaints }
   } finally {
     console.error = realError
     console.warn = realWarn
   }
+}
+
+/**
+ * Render the overview view.
+ *
+ * @param {object} exports - the loaded client module.
+ * @param {object} props - the view props.
+ * @returns {{ html: string, complaints: string[] }} the markup and React's output.
+ */
+function renderView(exports, props) {
+  return renderComponent(exports.OverviewView, {
+    range: 'month',
+    view: 'year',
+    onRange: () => {},
+    onView: () => {},
+    ...props,
+  })
 }
 
 /**
@@ -318,5 +326,128 @@ test('a model with no usage renders an empty meter rather than a broken stack', 
   assert.deepEqual(complaints, [])
   assert.equal(countByClass(html, 'tl-meter'), 1)
   assert.equal(countByClass(html, 'tl-seg'), 0, 'no segments to draw')
+})
+
+/* ------------------------------------------------------------------- rates -- */
+
+/** A ready rates payload: one fetched vendor, one entered by hand, one offline-only. */
+function ratesPayload(overrides = {}) {
+  const fetchedAt = new Date(2026, 2, 10, 12, 0, 0).getTime()
+  return {
+    plugin: 'token-ledger',
+    generatedAt: fetchedAt,
+    refreshIntervalMs: 1_800_000,
+    perVendor: 3,
+    currency: 'USD',
+    quote: 'CNY',
+    catalogue: {
+      available: true,
+      fetchedAt,
+      ageMs: 95 * 60 * 1000,
+      source: 'https://openrouter.ai/api/v1/models',
+      totalAvailable: 445,
+      modelCount: 6,
+      vendorCount: 2,
+    },
+    fx: { available: true, rate: 7.1234, base: 'USD', quote: 'CNY', source: 'https://open.er-api.com/v6/latest/USD', fetchedAt, ageMs: 95 * 60 * 1000, overridden: false },
+    overriddenModels: 1,
+    lastRefresh: { at: fetchedAt, ageMs: 60_000, catalogue: 'ok (6 models, 2 vendors)', fx: 'ok (1 USD = 7.1234 CNY)' },
+    vendors: [
+      {
+        vendor: 'acme',
+        modelCount: 12,
+        models: [
+          { id: 'acme/flagship', name: 'Acme Flagship', vendor: 'acme', created: 200, contextLength: 128000, prices: { input: 2.5, output: 75, cacheRead: 0.15, cacheWrite: 0.0002 }, source: 'manual' },
+          { id: 'acme/mini', name: 'Acme Mini', vendor: 'acme', created: 100, contextLength: 32000, prices: { input: 0.25, output: 1, cacheRead: null, cacheWrite: null }, source: 'fetched' },
+        ],
+      },
+      {
+        vendor: '',
+        modelCount: 1,
+        manualOnly: true,
+        models: [{ id: 'deepseek/deepseek-chat', name: 'deepseek/deepseek-chat', vendor: '', created: null, contextLength: null, prices: { input: 0.27, output: 1.1, cacheRead: null, cacheWrite: null }, source: 'manual' }],
+      },
+    ],
+    ...overrides,
+  }
+}
+
+const readyRates = { status: 'ready', data: ratesPayload(), error: null, saving: false, notice: null }
+
+test('the rates view renders under real React without the library objecting', { skip }, () => {
+  const exports = loadClient()
+  assert.equal(typeof exports.RatesView, 'function', 'the view must be exported for this test')
+
+  const { html, complaints } = renderComponent(exports.RatesView, { state: readyRates, onPatch: () => {} })
+  assert.deepEqual(complaints, [], 'React reported a problem with the rendered tree')
+  assert.ok(html.startsWith('<div class="tl-root"'), html.slice(0, 80))
+  assert.ok(html.includes('1 USD ='))
+  assert.ok(html.includes('7.1234'))
+  assert.ok(html.includes('open.er-api.com'), 'the source host is named, not the whole URL')
+  assert.ok(!html.includes('https://open.er-api.com'), 'the full URL is not dumped into the page')
+})
+
+test('every vendor group renders a header and one row per model', { skip }, () => {
+  const exports = loadClient()
+  const { html, complaints } = renderComponent(exports.RatesView, { state: readyRates, onPatch: () => {} })
+  assert.deepEqual(complaints, [])
+
+  assert.equal(countClass(html, 'tl-vendor'), 2, 'a fetched vendor and a hand-entered group')
+  assert.equal(countClass(html, 'tl-vendor-head'), 2)
+  assert.equal(countClass(html, 'tl-rate-head'), 2, 'each group carries its own column header')
+  assert.equal(countClass(html, 'tl-rate-row'), 3, 'one row per published model')
+  // Six cells per row: the model, four prices and the actions.
+  assert.equal(countByClass(html, 'tl-rate-price'), 12)
+  assert.ok(html.includes('Acme Flagship'))
+  assert.ok(html.includes('deepseek/deepseek-chat'))
+  // A manual row is marked in the markup, not only in prose.
+  assert.equal(countClass(html, 'tl-rate-row').valueOf(), 3)
+  assert.equal((html.match(/data-manual="true"/g) ?? []).length, 2)
+  // Prices keep their magnitude: a whole price loses its zeros, a hundredth of
+  // a cent does not round away, and an unpublished one is a dash.
+  assert.ok(html.includes('>$75<'))
+  assert.ok(html.includes('>$2.5<'))
+  assert.ok(html.includes('>$0.0002<'))
+  assert.ok(html.includes('>$0.15<'))
+  assert.ok(html.includes('>—<'))
+})
+
+test('the hand-entry form is a real form, with one field per price', { skip }, () => {
+  const exports = loadClient()
+  const { html, complaints } = renderComponent(exports.RatesView, { state: readyRates, onPatch: () => {} })
+  assert.deepEqual(complaints, [])
+  assert.equal(countClass(html, 'tl-manual-form'), 1)
+  assert.equal(countByClass(html, 'tl-field'), 10, 'five fields, each with a label element')
+  const inputs = html.match(/<input[^>]*class="tl-input[^"]*"[^>]*>/g) ?? []
+  // One filter box, one per row action set (none while nothing is being edited),
+  // and five in the manual form.
+  assert.ok(inputs.length >= 6, `expected the form's inputs, saw ${inputs.length}`)
+  assert.ok(html.includes('value=""'), 'the empty form starts empty')
+  // A blank model id cannot be submitted, and every field carries a label.
+  assert.ok(html.includes('disabled=""'), 'the save button starts disabled')
+})
+
+test('an offline rates payload renders without a rate and without complaint', { skip }, () => {
+  const exports = loadClient()
+  const offline = {
+    status: 'ready',
+    error: null,
+    saving: false,
+    notice: null,
+    data: ratesPayload({
+      catalogue: { available: false, fetchedAt: null, ageMs: null, source: 'https://openrouter.ai/api/v1/models', totalAvailable: null, modelCount: 0, vendorCount: 0 },
+      fx: { available: false, rate: null, base: 'USD', quote: 'CNY', source: 'https://open.er-api.com/v6/latest/USD', fetchedAt: null, ageMs: null, overridden: false },
+      vendors: [],
+      lastRefresh: { at: Date.now(), ageMs: 1000, catalogue: 'failed (timeout after 20000ms)', fx: 'failed (getaddrinfo ENOTFOUND)' },
+    }),
+  }
+  const { html, complaints } = renderComponent(exports.RatesView, { state: offline, onPatch: () => {} })
+  assert.deepEqual(complaints, [])
+  assert.ok(html.includes('neverFetched'))
+  assert.ok(html.includes('fxNone'))
+  assert.equal(countClass(html, 'tl-vendor'), 0)
+  assert.ok(html.includes('ratesEmpty'), 'the empty table says what to do instead')
+  assert.ok(html.includes('modelIdPlaceholder'), 'the hand-entry form is still offered')
+  assert.equal(countClass(html, 'tl-manual-form'), 1)
 })
 

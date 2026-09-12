@@ -8,6 +8,74 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.4.0] - 2026-09-10
+
+A second view: what the models cost, and what the dollar is worth. The settings
+section now has **概览 / Overview** and **费率 / Rates** tabs at the top.
+
+### Added
+
+- **A rates view.** It shows the live USD/CNY rate in its own box, then each
+  vendor's newest models with their published prices per million tokens — input,
+  output, cache read and cache write — and it lets any of those numbers be typed
+  over by hand.
+  - **Prices** come from a keyless public model list (OpenRouter's
+    `/api/v1/models` by default), filtered to the newest **two to three models per
+    vendor**. The full list runs to hundreds of entries, most of them superseded,
+    and a table nobody can scan is not a price list. Variants (`:batch`, `:free`,
+    …) are excluded from that selection because they are the same model at a
+    different price, and letting them count would fill a vendor's quota with one
+    model three times.
+  - **The rate** comes from a keyless exchange-rate endpoint and is shown to four
+    decimals with its source and age. It is displayed for reference only: **no
+    token count is multiplied by any price on this page**, which is why the rate
+    sits in its own box with a note saying so.
+  - **Freshness travels with the value.** Every served number carries where it
+    came from and how long ago it was fetched, because a stale price that looks
+    live is worse than no price.
+- **Offline is a supported state, not an error.** The host refreshes every
+  30 minutes; a failed refresh keeps the last good result on disk and reports
+  the attempt as failed rather than clearing anything, so a firewalled machine
+  shows the last known prices with a visible age instead of an empty page. On a
+  host that has **never** reached the network, hand-entered prices are published
+  as their own group and the page says so.
+- **Hand-entered values win and survive.** A price or a rate typed by the user is
+  stored beside the ledger, outranks every later fetch, and can be handed back to
+  the fetched value ("恢复自动 / Use fetched") or cleared per model. This is the
+  whole offline story: with `rates: false` a strictly offline host makes no
+  request at all and the page is a price list the user maintains themselves.
+- `lib/rates.js` (pure: payloads in, rows out) and `lib/rates-service.js` (the
+  network, the cache file, the timer, and the merge of hand-entered values).
+- `GET|POST /api/token-ledger/rates`. The write half is restricted: a JSON
+  content type is required — a cross-origin form can only send `urlencoded`,
+  `multipart` or `text/plain`, so requiring JSON is what keeps another page from
+  writing these values — the body is capped at 256 KiB, and the loopback peer
+  and origin checks are the same ones the read route uses. The write answers with
+  the re-read state, so a save is one round trip and the page never shows a value
+  the host rejected.
+
+### Notes
+
+- Prices are stored as **USD per one million tokens**, which is how vendors quote
+  them and how a person reads them. The scaling happens once, at the edge, so
+  nothing downstream has to remember which unit it holds.
+- **A model the source gives no price for is not published.** The live list marks
+  a router that has no single price with the sentinel `prompt: "-1"`,
+  `completion: "-1"` — five entries when this was written. A negative price is not
+  a price, is not free, and must not be shown as `$0`; those rows are dropped, and
+  the comment in `parseCatalogue` says why. Dropping them also matters for the
+  table's shape: a row of four dashes would take one of a vendor's few slots from
+  a model that has a real price. A price of `0` is kept, because free is a price.
+- The ledger format is unchanged, so a 0.3.0 ledger is still read. Prices live in
+  `<DSH_HOME>/token-ledger/rates.json`, beside the ledger, so one backup covers
+  both.
+- The rates view is a **reference table, not a bill**. Cost computation needs the
+  per-model token counts and the price of the route actually used, and both are
+  approximate in ways that would make a number wrong in a plausible-looking way.
+- Hand-entered prices are entered on the settings page, so a profile without a web
+  server can read the usage ledger but has no way to type a price yet. A CLI
+  equivalent is the obvious next addition.
+
 ## [0.3.0] - 2026-09-10
 
 Presentation changes, all of them from looking at the page in a real host.
