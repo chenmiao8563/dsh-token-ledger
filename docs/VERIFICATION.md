@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm test` — 190 tests in 11 files, no dependencies to install, no network. The
+`npm test` — 200 tests in 12 files, no dependencies to install, no network. The
 suite replaces `globalThis.fetch` for the duration of a mount, so the pricing
 refresh is exercised against a host with no route to the internet and no test can
 reach the real one:
@@ -30,7 +30,8 @@ reach the real one:
 | `test/route.test.mjs` | 24 | both routes: the loopback and origin guard, unsupported methods, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 path |
 | `test/rates.test.mjs` | 23 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, and the input validator |
 | `test/rates-service.test.mjs` | 12 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
-| `test/client.test.mjs` | 39 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the currency conversion and the USD fallback, the brand marks, the column geometry that keeps model names visible, which source the page attributes its prices to, the zero-price marking, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
+| `test/client.test.mjs` | 40 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, both views' rendering logic, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that prices are only fetched once the rates tab is open |
+| `test/vendor-prices.test.mjs` | 9 | the vendor pricing-page adapters: the HTML helpers, a price written as `0.15元` and as `输入：0.5元`, DeepSeek's merged label cells and both time-of-day columns, Z.ai's storage column that sometimes says "Limited-time Free", Tencent's label-embedded prices, and a row per period |
 | `test/client-render.test.mjs` | 13 | the same views under the real React, asserting the actual markup and that the library raises no complaint |
 | `test/slot-registration.test.mjs` | 8 | the registration fed into the real slot registry DSH ships |
 
@@ -242,6 +243,67 @@ that is a blend across routes, not a list price.
 here, a handful of Z.ai rows did not match its page, and the dataset is
 community-maintained. This is why the page names its source, keeps the fetch time
 on screen, and lets any number be typed over.
+
+### Reading the vendors' own pages instead
+
+Every one of the twelve vendors was then probed for a page a program can read, with
+browser headers, because the ask was to take the numbers from the vendors
+themselves:
+
+| Vendor | Result |
+| --- | --- |
+| **DeepSeek** | readable: `api-docs.deepseek.com/zh-cn/quick_start/pricing/` — a table in yuan with merged label cells, a peak and an off-peak column per line, and the charging window stated in prose |
+| **Z.ai** | readable: `docs.z.ai/guides/overview/pricing` — `Model / Input / Cached Input / Cached Input Storage / Output`, in dollars |
+| **Tencent** | readable: `cloud.tencent.com/document/product/1729/97731` — `产品名 / 刊例价（每 百万 tokens）`, with the prices written inside the label (`输入：0.5元`) |
+| OpenAI | `platform.openai.com/docs/pricing` answers **403** to a non-browser client, and `openai.com/api/pricing/` is a marketing page whose only prices are ChatGPT seat plans ($20/$100 per month) |
+| Anthropic | `docs.anthropic.com/.../pricing` is client-rendered — 434 KB, no prices in the markup, no tables. The table does exist in `docs.claude.com/llms-full.txt`, which is 34 MB, which is why it is not implemented yet |
+| Google | `ai.google.dev/gemini-api/docs/pricing` times out from this machine |
+| xAI | `docs.x.ai/docs/models` and `x.ai/api` time out from this machine |
+| Qwen | `help.aliyun.com/zh/model-studio/models` has 20 tables and no prices; the pricing must live on another path |
+| Kimi | `platform.moonshot.cn/docs/pricing/chat` renders its prices from a script payload |
+| MiniMax | `platform.minimaxi.com/document/price` carries only text-to-speech plan prices |
+| Xiaomi, ByteDance | JS shells; the Volcengine doc page returns 11 KB with no content |
+
+So three of the twelve are read live — **DeepSeek, Z.ai and Tencent** — and the
+other nine keep the dataset's numbers, with each vendor group on the page saying
+which it is. An adapter is added per vendor only when its page can be parsed and the
+result checked against the page; the framework is in `lib/vendor-prices.js`, so the
+remaining nine are a per-vendor job rather than a redesign.
+
+**What reading DeepSeek directly settled.** Its page prices `deepseek-flash` at
+`0.02 / 1 / 4` yuan per million off-peak and `0.04 / 2 / 8` at peak (cache-hit
+input / cache-miss input / output), and `deepseek-v4-pro` at `0.15 / 4.5 / 13.5` and
+`0.3 / 9 / 27`. The dataset had recorded `0.15 / 0.6` USD for the flash model with
+`0.003` cache reads — the **off-peak** number, converted. A reader checking at peak
+was being told half the real price. That is the concrete answer to "these numbers
+are not accurate", and it is why the two periods are now separate rows.
+
+**A correction to an earlier claim in this file.** The first pass concluded that
+"where the two sources differ, the vendor's page sides with the per-vendor
+dataset". That was wrong for one of the two models it rested on: Z.ai's page says
+`GLM-5.3-Flash` is `0.15 / 0.50`, which is the **gateway's** number, while the
+dataset had `0.075 / 0.25` — half. `GLM-5.2` did support the claim (`1.4 / 4.4` on
+the page and in the dataset, against the gateway's `0.6 / 2`). The honest summary is
+that each source is right for some models, which is the argument for reading the
+vendor's own page rather than for trusting either aggregator.
+
+### The vendor pages in the running host
+
+With the three adapters in place, a live run reports:
+
+```
+outcome: ok (37 models, 12 of 12 vendors, modelsdev; 3 vendor page(s) read)
+deepseek [vendor, CNY] — 北京时间周一至周五 9:00 - 12:00、14:00 - 18:00（其余为空闲时段）
+   DeepSeek-V4.1-Flash   peak     in 2    out 8     cacheRead 0.04
+   DeepSeek-V4.1-Flash   offPeak  in 1    out 4     cacheRead 0.02
+   DeepSeek-V4-Pro-0813  peak     in 9    out 27    cacheRead 0.3
+   DeepSeek-V4-Pro-0813  offPeak  in 4.5  out 13.5  cacheRead 0.15
+z-ai [vendor, USD]     GLM-5.3-Flash 0.15 / 0.5 · GLM-5.3 1.4 / 4.4
+tencent [vendor, CNY]  Hunyuan-a13b 输入 0.5 元 输出 2 元
+```
+
+Tencent matters for a second reason: it has **no entry in the per-vendor dataset at
+all**, so its own pricing page is the only reason it can appear.
 
 ## Note for whoever verifies this next
 

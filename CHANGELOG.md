@@ -60,9 +60,10 @@ section now has **概览 / Overview** and **费率 / Rates** tabs at the top.
   that is being edited clears that one price. This is the whole offline story: with
   `rates: false` a strictly offline host makes no request at all and the page is a
   price list the user maintains themselves.
-- `lib/rates.js` (pure: payloads in, rows out, one parser per source) and
-  `lib/rates-service.js` (the network, the cache file, the timer, the source
-  switch, and the merge of hand-entered values).
+- `lib/rates.js` (pure: payloads in, rows out, one parser per source),
+  `lib/vendor-prices.js` (one adapter per vendor whose own pricing page can be
+  read) and `lib/rates-service.js` (the network, the cache file, the timer, the
+  source switch, the vendor-page merge, and the merge of hand-entered values).
 - `GET|POST /api/token-ledger/rates`. The write half is restricted: a JSON
   content type is required — a cross-origin form can only send `urlencoded`,
   `multipart` or `text/plain`, so requiring JSON is what keeps another page from
@@ -103,15 +104,52 @@ Four things only a person reading the rendered table could have asked for:
   is not what happened. `rates.vendors: 0` publishes all of them; at the default
   the payload drops from 30 KB to 11 KB.
 
+### Changed, once the prices were checked against the vendors
+
+- **Prices are read from the vendors' own pricing pages where that is possible.**
+  Three of them are: DeepSeek, Z.ai and Tencent. Each vendor group now says which
+  it is — a `官方 / vendor` badge means those numbers were read from that vendor's
+  page, and no badge means the per-vendor dataset. That distinction is the point:
+  an earlier draft showed a dataset's numbers as if they were the vendors', and
+  they are not always the same number.
+- **DeepSeek is split into peak and off-peak.** Their page prices two models in
+  yuan across three lines — cache-hit input, cache-miss input, output — with a peak
+  and an off-peak column, off-peak being half of peak outside 09:00–12:00 and
+  14:00–18:00 Beijing time on weekdays. So DeepSeek gets a row per period,
+  labelled, because those are two prices for one model and hiding one behind a
+  toggle would make the table wrong for whoever is reading it at the wrong hour.
+  The window appears in the vendor's own words, not paraphrased.
+  This is also what the dataset had wrong: it recorded the **off-peak** price as
+  if it were the price, so a peak-hour read was understated by half.
+- **A vendor that publishes in yuan is shown in yuan.** DeepSeek and Tencent quote
+  CNY per million tokens; those numbers are passed through as published rather than
+  converted, and the price editor follows the row's currency, so typing into a yuan
+  row means yuan. Dataset prices are USD and are converted with the rate in the box
+  above, as before.
+- **The vendor list is twelve names, not twenty-one**: OpenAI, Anthropic, Google,
+  DeepSeek, Qwen, xAI, Z.ai, Kimi, MiniMax, Tencent, Xiaomi and ByteDance — each
+  written the way the vendor writes it rather than as its source key. Tencent has
+  no entry in the per-vendor dataset at all, so its own pricing page is the only
+  reason it can be shown.
+- **Real vendor marks instead of monograms.** Twelve official marks are drawn
+  inline: the geometry came from the vendors' own sites where they publish an SVG
+  (OpenAI, Z.ai, Tencent) and otherwise from Simple Icons, which carries the
+  official marks as plain files. Nothing was drawn by hand and nothing is fetched
+  at page load, and each mark sits on a small white tile because several of them
+  are black and the panel may be dark. They are the trademarks of their owners,
+  used to identify whose price is being shown. A vendor with no bundled mark still
+  gets its letters.
+
 ### Notes
 
-- Prices are stored as **USD per one million tokens**, which is how vendors quote
-  them and how a person reads them. The scaling happens once, at the edge, so
-  nothing downstream has to remember which unit it holds. The display conversion
-  goes the other way, at the last moment, from the same rate the table showed —
-  including in the price editor, so typing into a table that reads ¥ does not mean
-  typing dollars. Converting back rounds to the six decimals the host keeps, so a
-  value that leaves and returns unchanged comes back identical.
+- Prices are stored as **USD per one million tokens** unless the vendor publishes
+  in another currency, in which case the vendor's own number and currency are kept
+  as published — converting a vendor's yuan price into dollars only to convert it
+  back for display would add error for nothing. A USD price is converted for
+  display at the last moment, from the same rate the table showed, including in the
+  price editor, so typing into a table that reads ¥ does not mean typing dollars.
+  Converting back rounds to the six decimals the host keeps, so a value that leaves
+  and returns unchanged comes back identical.
 - **A model the source gives no price for is not published.** The live list marks
   a router that has no single price with the sentinel `prompt: "-1"`,
   `completion: "-1"` — five entries when this was written. A negative price is not

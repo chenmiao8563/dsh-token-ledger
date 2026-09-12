@@ -749,7 +749,7 @@ test('with no rate the table falls back to USD and says why', () => {
   assert.ok(titles.every((title) => title === undefined), JSON.stringify(titles))
 })
 
-test('every vendor gets a brand mark, curated or not', () => {
+test('every vendor gets a mark, and it is the vendor’s own', () => {
   const { module } = loadWithSection()
   const curated = ratesPayload({
     vendors: [
@@ -770,19 +770,82 @@ test('every vendor gets a brand mark, curated or not', () => {
       },
     ],
   })
-  const { tree } = renderRates(module, { status: 'ready', data: curated, error: null })
+  const { tree, text } = renderRates(module, { status: 'ready', data: curated, error: null })
   const marks = findAllByClass(tree, 'tl-logo')
   assert.equal(marks.length, 1)
-  assert.deepEqual(collectText(marks[0]), ['DS'], 'a curated vendor gets its monogram')
-  assert.equal(marks[0].props.style.background, '#4d6bfe', 'in its own brand colour')
+  // The mark is the vendor's own geometry, drawn inline so it needs no network.
+  const svg = marks[0].children.find((child) => child.type === 'svg')
+  assert.ok(svg !== undefined, 'a bundled vendor draws an SVG mark')
+  assert.equal(svg.props.viewBox, '0 0 24 24')
+  assert.equal(svg.children.length, 1, 'DeepSeek is a single path — the whale')
+  assert.equal(svg.children[0].props.fill, '#5786FE', 'in the brand colour the vendor publishes')
+  assert.ok(svg.children[0].props.d.length > 1000, 'and it is the real outline, not a letter')
+  // The name is the vendor's own spelling, not the source key.
+  assert.ok(hasText(text, 'DeepSeek'), 'the display name is capitalised the way the vendor writes it')
+  assert.ok(!hasText(text, 'deepseek ('))
 
-  // A vendor nobody curated still gets one, or the leading column looks broken;
-  // the hand-entered group is marked as what it is.
+  // A vendor with no bundled mark still gets something, or the leading column
+  // looks broken; the hand-entered group is marked as what it is.
   const { tree: mixed } = renderRates(module, { status: 'ready', data: ratesPayload(), error: null })
   const all = findAllByClass(mixed, 'tl-logo')
   assert.equal(all.length, 2, 'one per vendor group')
-  assert.deepEqual(collectText(all[1]), ['··'], 'the hand-entered group carries no brand')
+  assert.deepEqual(collectText(all[0]), ['AC'], 'an unknown vendor falls back to its letters')
   assert.match(all[0].props.style.background, /^#[0-9a-f]{6}$/)
+  assert.deepEqual(collectText(all[1]), ['··'], 'the hand-entered group carries no brand')
+})
+
+test('a vendor priced from its own page says so, and a dataset vendor does not', () => {
+  const { module } = loadWithSection()
+  const mixed = ratesPayload({
+    vendors: [
+      {
+        vendor: 'deepseek',
+        modelCount: 2,
+        source: 'vendor',
+        sourceUrl: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/',
+        currency: 'CNY',
+        note: '北京时间周一至周五 9:00 - 12:00、14:00 - 18:00（其余为空闲时段）',
+        models: [
+          { id: 'deepseek/deepseek-flash@peak', name: 'DeepSeek-V4.1-Flash', vendor: 'deepseek', created: null, contextLength: null, prices: { input: 2, output: 8, cacheRead: 0.04, cacheWrite: null }, period: 'peak', source: 'vendor' },
+          { id: 'deepseek/deepseek-flash@offPeak', name: 'DeepSeek-V4.1-Flash', vendor: 'deepseek', created: null, contextLength: null, prices: { input: 1, output: 4, cacheRead: 0.02, cacheWrite: null }, period: 'offPeak', source: 'vendor' },
+        ],
+      },
+      {
+        vendor: 'google',
+        modelCount: 1,
+        source: 'dataset',
+        models: [
+          { id: 'google/gemini-3.8-flash', name: 'Gemini 3.8 Flash', vendor: 'google', created: null, contextLength: null, prices: { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: null }, source: 'fetched' },
+        ],
+      },
+    ],
+  })
+  const { tree, text } = renderRates(module, { status: 'ready', data: mixed, error: null })
+
+  // One badge for the vendor whose own page was read, and none for the other.
+  // Scoped to the vendor groups, because the rate box carries a badge of its own
+  // and `tl-vendor` alone also matches the head, the name and the count.
+  const groups = findAllByClass(tree, 'tl-vendor').filter((element) => element.props.className === 'tl-vendor')
+  assert.equal(groups.length, 2)
+  assert.equal(countByClass(groups[0], 'tl-badge'), 1, 'the vendor-priced group is marked')
+  assert.equal(countByClass(groups[1], 'tl-badge'), 0, 'the dataset-priced group makes no such claim')
+  assert.ok(hasText(text, 'sourceOfficial'))
+  // The vendor's own wording for the charging window is shown as written.
+  assert.ok(hasText(text, '北京时间周一至周五'), 'the window is the vendor’s own sentence')
+  // Both periods are rows, labelled, because they are two prices for one model.
+  const rows = findAllByClass(tree, 'tl-rate-row')
+  assert.equal(rows.length, 3)
+  assert.equal(rows[0].props['data-period'], 'peak')
+  assert.equal(rows[1].props['data-period'], 'offPeak')
+  assert.equal(rows[2].props['data-period'], '')
+  assert.ok(hasText(text, 'periodPeak') && hasText(text, 'periodOffPeak'))
+  // A yuan price is shown as published: a vendor that quotes in yuan is already
+  // in the display currency, so 2 is 2 and not 2 × rate.
+  assert.ok(hasText(text, '¥2'), 'the vendor’s own number, unconverted')
+  assert.ok(hasText(text, '¥4'), 'and the off-peak number beside it')
+  assert.ok(!hasText(text, '¥14.25'), 'nothing was converted')
+  // The dataset vendor is still converted with the rate in the box (7.1234 here).
+  assert.ok(hasText(text, '¥5.34'), 'Gemini at 0.75 USD becomes 5.34 CNY')
 })
 
 test('the model-name column has a floor, and a table too wide for the pane scrolls', () => {
@@ -819,7 +882,7 @@ test('each vendor group lists its models with a column per price', () => {
   for (const key of ['priceInput', 'priceOutput', 'priceCacheRead', 'priceCacheWrite']) {
     assert.ok(hasText(text, key), `missing ${key}`)
   }
-  assert.ok(hasText(text, 'acme'))
+  assert.ok(hasText(text, 'Acme'), 'the vendor name is capitalised for display')
   assert.ok(hasText(text, 'Acme Flagship'))
   assert.ok(hasText(text, 'deepseek/deepseek-chat'))
   // The vendor-less group is named after what it is rather than left blank.

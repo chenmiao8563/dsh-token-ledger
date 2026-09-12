@@ -184,9 +184,9 @@ test('the per-vendor source publishes each vendor’s own list price', () => {
       },
     },
     // Already namespaced by the source, so it must not be prefixed twice.
-    nvidia: {
+    volcengine: {
       models: {
-        'nvidia/nemotron-3.5-lightning': { id: 'nvidia/nemotron-3.5-lightning', name: 'Nemotron 3.5', release_date: '2026-08-11', cost: { input: 0.1, output: 0.4 } },
+        'volcengine/doubao-seed-2-0': { id: 'volcengine/doubao-seed-2-0', name: 'Doubao Seed', release_date: '2026-08-11', cost: { input: 0.1, output: 0.4 } },
       },
     },
     // Not one of the curated vendors, and not published.
@@ -194,7 +194,7 @@ test('the per-vendor source publishes each vendor’s own list price', () => {
   }
 
   const parsed = parseModelsDev(payload, { vendorLimit: 0 })
-  assert.deepEqual(parsed.vendors.map((entry) => entry.vendor), ['deepseek', 'qwen', 'nvidia'], 'curated order, mapped provider ids')
+  assert.deepEqual(parsed.vendors.map((entry) => entry.vendor), ['deepseek', 'qwen', 'bytedance'], 'curated order, mapped provider ids')
   assert.equal(parsed.availableVendorCount, 3)
   assert.equal(parsed.selected, 4, 'two from DeepSeek, one from each of the others')
 
@@ -210,26 +210,26 @@ test('the per-vendor source publishes each vendor’s own list price', () => {
   assert.equal(flash.created, Date.parse('2026-09-10'))
   assert.equal(flash.vendor, 'deepseek')
 
-  assert.equal(parsed.vendors[2].models[0].id, 'nvidia/nemotron-3.5-lightning', 'an id already carrying a vendor part is left alone')
+  assert.equal(parsed.vendors[2].models[0].id, 'volcengine/doubao-seed-2-0', 'an id already carrying a vendor part is left alone')
   assert.equal(parsed.total, 4, 'every priced model the curated vendors listed')
 })
 
 test('a vendor’s own models win its slots over the ones it hosts', () => {
-  // Bedrock lists openai.*, Nvidia lists deepseek-ai/*, Alibaba lists DeepSeek.
-  // Those rows are real prices for the platform, but a hosted model must not take
-  // a vendor's slot away from the vendor itself — which is what happened to
-  // Mistral, whose newest row was a Z.ai model.
+  // Alibaba lists DeepSeek and Volcengine lists DeepSeek and Qwen. Those rows are
+  // real prices for those platforms, but a hosted model must not take a vendor's
+  // slot away from the vendor itself — which is what happened to Mistral, whose
+  // newest row was a Z.ai model.
   const payload = {
-    mistral: {
+    alibaba: {
       models: {
-        'zai-glm-5-2': { id: 'zai-glm-5-2', name: 'GLM-5.2', release_date: '2026-09-30', cost: { input: 1.4, output: 4.4 } },
-        'mistral-medium-2604': { id: 'mistral-medium-2604', name: 'Mistral Medium 3.5', release_date: '2026-04-29', cost: { input: 1.5, output: 7.5 } },
+        'deepseek-v4-flash-0731': { id: 'deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash', release_date: '2026-09-30', cost: { input: 0.2, output: 0.4 } },
+        'qwen3.8-max': { id: 'qwen3.8-max', name: 'Qwen3.8 Max', release_date: '2026-08-03', cost: { input: 2, output: 6 } },
       },
     },
-    nvidia: {
+    volcengine: {
       models: {
-        'deepseek-ai/deepseek-v4-pro': { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek V4 Pro', release_date: '2026-09-20', cost: { input: 0, output: 0 } },
-        'nvidia/nemotron-3.5-lightning': { id: 'nvidia/nemotron-3.5-lightning', name: 'Nemotron 3.5 Lightning', release_date: '2026-08-11', cost: { input: 0.1, output: 0.4 } },
+        'deepseek-v4-pro-ga': { id: 'deepseek-v4-pro-ga', name: 'DeepSeek V4 Pro', release_date: '2026-09-20', cost: { input: 0, output: 0 } },
+        'doubao-seed-2-0': { id: 'doubao-seed-2-0', name: 'Doubao Seed 2.0', release_date: '2026-06-23', cost: { input: 0.1, output: 0.4 } },
       },
     },
   }
@@ -237,7 +237,7 @@ test('a vendor’s own models win its slots over the ones it hosts', () => {
   const parsed = parseModelsDev(payload, { vendorLimit: 0, perVendor: 1 })
   assert.deepEqual(
     parsed.vendors.map((entry) => entry.models[0].id),
-    ['mistralai/mistral-medium-2604', 'nvidia/nemotron-3.5-lightning'],
+    ['qwen/qwen3.8-max', 'bytedance/doubao-seed-2-0'],
     'the vendor comes before its hosted guests, even when the guest is newer',
   )
   // Nothing is dropped: the hosted row is still in the vendor's list.
@@ -246,13 +246,13 @@ test('a vendor’s own models win its slots over the ones it hosts', () => {
 })
 
 test('an all-zero price is flagged rather than quietly called free', () => {
-  // Nvidia NIM is billed by GPU-hour and lists 0 per token, so a bare ¥0 would
-  // claim the model is free. The row keeps the number and carries the warning.
+  // Some platforms bill by the hour and list 0 per token, so a bare ¥0 would claim
+  // the model is free. The row keeps the number and carries the warning.
   const payload = {
-    nvidia: {
+    minimax: {
       models: {
-        'nvidia/nemotron-3.5-lightning': { id: 'nvidia/nemotron-3.5-lightning', name: 'Nemotron 3.5', release_date: '2026-08-11', cost: { input: 0, output: 0 } },
-        'nvidia/priced': { id: 'nvidia/priced', name: 'Priced', release_date: '2026-08-10', cost: { input: 0, output: 0.4 } },
+        'MiniMax-M3': { id: 'MiniMax-M3', name: 'MiniMax-M3', release_date: '2026-08-11', cost: { input: 0, output: 0 } },
+        'MiniMax-priced': { id: 'MiniMax-priced', name: 'Priced', release_date: '2026-08-10', cost: { input: 0, output: 0.4 } },
       },
     },
   }

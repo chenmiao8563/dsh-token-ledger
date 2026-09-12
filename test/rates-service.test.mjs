@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { createRatesService, fetchJson } from '../lib/rates-service.js'
+import { VENDOR_PRICE_SOURCES } from '../lib/vendor-prices.js'
 
 /** A model list with two vendors. */
 const MODELS = {
@@ -71,7 +72,9 @@ test('a successful refresh publishes the catalogue and the rate, and caches them
     const outcome = await service.refresh({ reason: 'test' })
     assert.match(outcome.catalogue, /^ok/)
     assert.match(outcome.fx, /^ok/)
-    assert.equal(calls.length, 2, 'one request per source')
+    // The model list, the rate, and one request per vendor whose own pricing page
+    // is read. The stub answers every one of them, so nothing fails here.
+    assert.equal(calls.length, 2 + Object.keys(VENDOR_PRICE_SOURCES).length, 'the list, the rate, and each vendor page')
 
     const view = service.read()
     assert.equal(view.catalogue.available, true)
@@ -335,7 +338,12 @@ test('the default source is each vendor’s own list price, not a gateway quote'
     const max = state.vendors[1].models[0]
     assert.equal(max.id, 'qwen/qwen3.8-max')
     assert.equal(max.prices.cacheWrite, 2.5, 'a cache-write price is carried when the source has one')
-    assert.equal(calls.length, 2)
+    // The stub answers the vendor pages with the same JSON fixture, whose HTML
+    // parse yields nothing, so every vendor here falls back to the dataset — and
+    // that shows up as `source: 'dataset'` rather than as a broken table.
+    assert.equal(calls.length, 2 + Object.keys(VENDOR_PRICE_SOURCES).length)
+    assert.ok(state.vendors.every((entry) => entry.source === 'dataset'), 'a page that yields nothing is a fallback, not a failure')
+    assert.equal(state.catalogue.vendorPages.filter((entry) => entry.ok).length, 0)
   } finally {
     cleanup()
   }

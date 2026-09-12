@@ -176,27 +176,35 @@ tabs: **Overview** and **Rates**.
   long ago it was fetched. It is shown for reference: this page computes **no
   cost**, and it says so on the page.
 - **Each vendor's newest models**, two to three per vendor, with the published
-  price per million tokens for input, output, cache read and cache write. Prices
-  are **the vendors' own list prices**, taken from a per-vendor price list and
-  converted into yuan with the rate above; every converted cell keeps the dollar
-  quote it came from in its tooltip, and with no rate fetched the table falls back
-  to USD and labels its column in dollars rather than printing a number it cannot
-  stand behind. A price the vendor does not publish is a dash, which is a different
-  claim from "free", and a published `0` is flagged as *not necessarily free*
-  because some platforms bill by the hour and publish no per-token price.
+  price per million tokens for input, output, cache read and cache write. A USD
+  price is converted into yuan with the rate above; every converted cell keeps the
+  dollar quote it came from in its tooltip, and with no rate fetched the table falls
+  back to USD and labels its column in dollars rather than printing a number it
+  cannot stand behind. A price the vendor does not publish is a dash, which is a
+  different claim from "free", and a published `0` is flagged as *not necessarily
+  free* because some platforms bill by the hour and publish no per-token price.
 - **Prices come from where the vendors publish them.** None of these vendors
   exposes prices through an API — their model-list endpoints return ids and no
-  money, so the number only exists on their pricing page. The default source is
-  [models.dev](https://models.dev), which reads those pages and is what the page
-  attributes its prices to; `rates.source: openrouter` switches to that gateway's
-  own quotes, which cover more models but are not the vendors' list prices. The
-  page says which one it is showing, because the two are different claims.
-- **The fifteen most familiar vendors**, in a curated order rather than by model
-  count: the live list runs to 59, most of them one-model publishers nobody is
-  shopping for, and a table of 59 is not a price list either. Each vendor carries a
-  two-letter brand mark in its own colour, drawn by the page so it works offline; a
-  vendor outside the curated list gets a mark too, coloured from a hash of its name.
-  `rates.vendors: 0` publishes every vendor.
+  money, so the number only exists on their pricing page. Where that page can be
+  read, it is: **DeepSeek, Z.ai and Tencent** are priced from their own pages, and
+  their group carries a `vendor` badge saying so. The rest come from a per-vendor
+  public dataset ([models.dev](https://models.dev)); `rates.source: openrouter`
+  switches the whole table to that gateway's own quotes, which cover more models but
+  are not the vendors' list prices. The page says which is which, because those are
+  different claims.
+- **DeepSeek shows peak and off-peak separately.** Its page prices two models in
+  yuan across cache-hit input, cache-miss input and output, each with a peak and an
+  off-peak column — off-peak being half of peak outside 09:00–12:00 and 14:00–18:00
+  Beijing time on weekdays. Each period is its own labelled row, and the window is
+  quoted from the vendor's own page. A vendor that publishes in yuan is displayed in
+  yuan, unconverted.
+- **The twelve vendors worth listing**, each with its own mark drawn inline from
+  bundled geometry: OpenAI, Anthropic, Google, DeepSeek, Qwen, xAI, Z.ai, Kimi,
+  MiniMax, Tencent, Xiaomi and ByteDance. The marks are the official ones — taken
+  from the vendors' own sites or from Simple Icons — and are the trademarks of their
+  owners, used to identify whose price is shown. A vendor outside this list still
+  gets a mark and a place when a source carries it; `rates.vendors: 0` publishes
+  every vendor.
 - **Hand entry.** Any price, and the rate itself, can be typed over — in the
   currency the table is showing. A typed value outranks every later fetch, is
   marked as hand-entered in the table, and can be handed back to the fetched value
@@ -242,10 +250,10 @@ Override the composition entry by its `id`:
     rates: false                        # default: true — false makes no network request at all
     # rates also takes an object:
     # rates:
-    #   source: modelsdev                # default: each vendor's own list price; 'openrouter' for gateway quotes
+    #   source: modelsdev                # default: the per-vendor dataset; 'openrouter' for gateway quotes
     #   refreshIntervalMs: 1800000       # default: 30 minutes
     #   perVendor: 3                     # default: 3 newest models per vendor
-    #   vendors: 15                      # default: the 15 most familiar; 0 publishes every vendor
+    #   vendors: 15                      # default: cap on how many vendors to publish; 0 for all
     #   modelsUrl: 'https://…'           # default: per source — https://models.dev/api.json
     #   fxUrl: 'https://…/latest/USD'    # default: open.er-api.com
 ```
