@@ -629,6 +629,15 @@ useful:
   from a running host — but no one has yet looked at the Rates tab on screen. The
   0.3.0 round of feedback came from looking at the page; this one has not had that
   pass.
+- **The vendor marks as pixels.** Twelve bundled marks are checked structurally:
+  each is diffed against the vendor's original file — same element sequence, same
+  path geometry, same transforms, fill-rules, clip paths and classes — so a dropped
+  `<g transform>`, a lost CSS class or a missing clip path fails the check, which is
+  exactly how three of them were wrong. That is not the same as looking at them.
+  This environment has no headless browser to rasterize with (Electron is here, but
+  the packaged DSH build will not run an external app, and a script path passed to
+  it is ignored), so `docs/logo-preview.html` exists for a human to open instead —
+  all twelve at the page's real 18px and enlarged, on a light and a dark band.
 - **Price accuracy.** The tables are asserted to carry what the source published,
   spot-checked against one vendor's published numbers. Nothing here verifies that
   a source is correct, current, or the price a given account is actually billed.
