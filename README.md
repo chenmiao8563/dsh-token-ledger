@@ -398,13 +398,22 @@ The ledger file is left alone on purpose — delete
 
 ```bash
 npm install         # devDependencies only: react, react-dom, and the slot registry DSH runs
-npm test            # 106 tests
+npm test            # 284 tests in 14 files
 npm run verify      # packaging invariants (dependency-free, no install scripts, no bare imports)
 ```
 
 `npm test` uses Node's built-in test runner. In a restricted environment where
 spawning a child process per test file is blocked, use
 `npm run test:single-process`.
+
+**What a change needs to take effect.** Both halves are read when the plugin mounts,
+so editing `lib/index.js` *or* `lib/client.js` needs a DSH restart (or a plugin
+reload) — refreshing the page is not enough, because the bundle's `rev` is computed
+at mount and an unchanged URL keeps the browser's cached copy. Measured, not assumed:
+with an isolated host running, a change to `lib/client.js` left both the served
+bundle and its `rev` (`d683dd523466`) untouched, while a restart changed the rev
+(`f55ee321db50`) and served the change. Exports are files, so if the one you are
+looking at came from before a fix, its timestamp will say so.
 
 The devDependencies are **test-only**. They are never installed for a consumer:
 the package ships with no dependencies, no peer dependencies and no install

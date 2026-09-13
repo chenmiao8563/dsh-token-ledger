@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-09-12
+
+### Changed
+
+- **The bill's numbers sit right after the names.** Reported as a gap between the
+  group column and the rest — "把后面的列整体往前移动一些". The group column was the
+  flexible one, so on a wide panel it swallowed every spare pixel and the figures
+  drifted to the card's far right. It is now sized by the longest name in the table
+  (120px floor, 360px cap) and the width the numbers no longer use goes to an empty
+  trailing track, so a row still reaches the card's edge and the separator rules stay
+  full width. A row is its own grid, so sizing the column by its content is a
+  *shared*-column decision — `subgrid` is what lets the rows take their columns from
+  the table — and where that is unsupported the column falls back to `1fr`, which is
+  the previous layout rather than a broken one. The gap between columns drops from
+  8px to 6px as well. The two track widths already in the working tree (a 90px cost
+  column and a 120px floor) are kept.
+- **The README now states what a change needs to take effect, and it corrects an
+  earlier claim.** Both halves are read when the plugin mounts, so an edit to
+  `lib/index.js` *or* `lib/client.js` needs a DSH restart; a page refresh is not
+  enough. Verified with an isolated host rather than assumed: while it ran, a change
+  to `lib/client.js` left both the served bundle and its `rev` (`d683dd523466`)
+  untouched, and a restart changed the rev (`f55ee321db50`) and served the change.
+  An earlier note in this repository (and in the day's work review) said a
+  client-half change only needed a refresh; that was inference, and it was wrong.
+
 ## [0.7.1] - 2026-09-12
 
 ### Fixed
@@ -577,7 +602,8 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.5.0...v0.6.0

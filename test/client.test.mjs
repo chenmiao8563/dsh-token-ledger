@@ -1732,6 +1732,40 @@ test('the bill table shows a row per group, both halves of the input and the cos
   assert.ok(hasText(collectText(total), '¥144.20'), 'the total is the bill, not the usage alone')
 })
 
+test('the bill’s numbers sit after the names, not at the far right of the card', () => {
+  // Reported: "工作区和后面的列中间还有一定的间隙，把后面的列整体往前移动一些". The
+  // name column was the flexible one, so on a wide card it swallowed every spare pixel
+  // and the numbers drifted right. Making it content-sized is a shared-column
+  // decision: each row is its own grid, so sizing it per row would misalign the
+  // columns between rows and a bill is read down its columns. `subgrid` is what lets
+  // the rows share one set of columns, so both forms are pinned here — the fallback as
+  // a real, aligned fallback, and the subgrid form with a capped name column.
+  const source = readFileSync(fileURLToPath(new URL('../lib/client.js', import.meta.url)), 'utf8')
+
+  const fallback = /\.tl-bill-head, \.tl-bill-row, \.tl-bill-total \{ display: grid; grid-template-columns: minmax\((\d+)px, 1fr\) (\d+)px 96px 88px 88px 76px (\d+)px; align-items: center; gap: (\d+)px/.exec(source)
+  assert.ok(fallback !== null, 'the per-row geometry is declared in one place')
+  const floor = Number(fallback[1])
+  const gap = Number(fallback[4])
+  assert.equal(gap, 6, 'the gap between the columns is tighter than the 8px it was')
+
+  const shared = /\.tl-bill-table \{ display: grid; grid-template-columns: minmax\((\d+)px, (\d+)px\) (\d+)px 96px 88px 88px 76px (\d+)px 1fr; column-gap: (\d+)px/.exec(source)
+  assert.ok(shared !== null, 'the table declares the columns its rows share')
+  assert.equal(Number(shared[1]), floor, 'the floor is the same in both forms')
+  assert.ok(Number(shared[2]) <= 400, `one long name must not push the numbers off the card, saw a ${shared[2]}px cap`)
+  assert.ok(Number(shared[2]) > floor, 'the name column still grows, it just stops')
+  assert.equal(Number(shared[5]), gap, 'and the gap is the same in both forms')
+  // The empty trailing track is what keeps a row as wide as the card, so the
+  // separator rules under the rows do not stop short of its right edge.
+  assert.ok(/(\d+)px 1fr; column-gap/.test(shared[0]), 'the spare width is taken by an empty track')
+
+  assert.match(source, /@supports \(grid-template-columns: subgrid\) \{/, 'the tight layout is gated on subgrid')
+  assert.match(
+    source,
+    /\.tl-bill-head, \.tl-bill-row, \.tl-bill-total \{ grid-column: 1 \/ -1; grid-template-columns: subgrid; \}/,
+    'and there the rows take their columns from the table',
+  )
+})
+
 test('the bill states what it could not price and how it joined the rest', () => {
   const { module } = loadWithSection()
   const text = collectText(renderBillView(module, billStates()))
