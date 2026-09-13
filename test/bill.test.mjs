@@ -17,11 +17,13 @@ import {
   BILL_RANGES,
   BILL_SECTIONS,
   CSV_BOM,
+  SMALL_SESSION,
   billToCsv,
   buildBill,
   buildBillSections,
   costOf,
   entryFor,
+  isSmallSession,
   modelMatch,
   modelTokens,
   priceEntries,
@@ -30,6 +32,7 @@ import {
   subscriptionShare,
   workspaceName,
 } from '../lib/bill.js'
+import { cacheHitRate } from '../lib/overview.js'
 
 /** Money, to the cent: floating-point sums are never exactly equal. */
 function closeTo(actual, expected, what = '') {
@@ -516,6 +519,87 @@ test('a plan may name the provider whose endpoint it pays for', () => {
   // The plan records both what it was written as and what it was charged against.
   assert.equal(viaProvider.subscriptions[0].namedVendor, 'openai-official')
   assert.equal(viaProvider.subscriptions[0].vendor, 'openai')
+})
+
+test('the small-session rule folds the cheap and the barely-used, and nothing else', () => {
+  // The standard: ¥1 or fewer than 10 calls, chosen against a real ledger where it folds
+  // half of an all-time list while hiding 2% of the money. The refusals matter as much as
+  // the hits — a session worth real money keeps its line even when it was asked once, and
+  // an unpriced row is never folded, because its zero is ignorance rather than thrift.
+  assert.deepEqual(SMALL_SESSION, { cost: 1, calls: 10 })
+  assert.equal(isSmallSession({ cost: 0.02, calls: 2 }), true, 'the reported case: two calls, two cents')
+  assert.equal(isSmallSession({ cost: 0.95, calls: 29 }), true, 'cheap, even with 29 calls')
+  assert.equal(isSmallSession({ cost: 12, calls: 3 }), true, 'asked once, so no line — it is summarised, not lost')
+  assert.equal(isSmallSession({ cost: 1, calls: 10 }), false, 'exactly at the thresholds is not under them')
+  assert.equal(isSmallSession({ cost: 4.5, calls: 120 }), false, 'real money and real use')
+  assert.equal(isSmallSession({ cost: 0, calls: 1, unpricedTokens: 5_000_000 }), false, 'never an unpriced row')
+  assert.equal(isSmallSession({ cost: 0, calls: 1, unpricedTokens: 0 }), true)
+  // The thresholds are the config's to set, and the cost one is read in the bill's currency.
+  assert.equal(isSmallSession({ cost: 3, calls: 50 }, { cost: 5, calls: 100 }), true)
+  assert.equal(isSmallSession({ cost: 3, calls: 50 }, { cost: 1, calls: 10 }), false)
+})
+
+test('the page may summarise the session list, and the export may not', () => {
+  const many = snapshot({
+    sessions: [
+      { sessionId: 's1', cwd: 'D:\\proj', title: '问了就归档', calls: 1 },
+      { sessionId: 's2', cwd: 'D:\\proj', title: '也问了就归档', calls: 2 },
+      { sessionId: 's3', cwd: 'D:\\proj', title: '真正干活的', calls: 40 },
+    ],
+    usage: [
+      usage('2026-09-11', 's1', 'openai-official/gpt-6-astra', counters(10_000, 0, 0), counters(0, 0, 0), 1),
+      usage('2026-09-11', 's2', 'openai-official/gpt-6-astra', counters(20_000, 0, 0), counters(0, 0, 0), 2),
+      usage('2026-09-11', 's3', 'openai-official/gpt-6-astra', counters(8_000_000, 0, 0), counters(0, 0, 0), 40),
+    ],
+  })
+  const folded = buildBill({ snapshot: many, catalogue: catalogue(), by: 'session', range: 'month', fold: true, now: SEPTEMBER })
+  const listed = buildBill({ snapshot: many, catalogue: catalogue(), by: 'session', range: 'month', now: SEPTEMBER })
+
+  // The export keeps every session: three rows and no summary.
+  assert.equal(listed.rows.length, 3)
+  assert.equal(listed.fold, null)
+  assert.ok(listed.rows.every((row) => row.folded !== true))
+
+  // The page shows the session that cost something, plus one line for the other two.
+  assert.equal(folded.rows.length, 2)
+  const summary = folded.rows.find((row) => row.folded === true)
+  const work = folded.rows.find((row) => row.folded !== true)
+  assert.equal(summary.foldedCount, 2)
+  assert.equal(summary.label, null, 'the page names it, in the reader’s language')
+  assert.equal(summary.calls, 3, 'its call count is the two sessions’ calls')
+  assert.equal(summary.sessionCount, 2)
+  assert.equal(work.label, 'proj/真正干活的')
+  assert.deepEqual(folded.fold, { count: 2, costBelow: 1, callsBelow: 10, currency: 'CNY' })
+
+  // The arithmetic is untouched: same total, and the rows still add up to it.
+  closeTo(folded.totals.totalCost, listed.totals.totalCost)
+  closeTo(folded.rows.reduce((sum, row) => sum + row.cost, 0), folded.totals.totalCost, 'the summary carries their money rather than discarding it')
+  assert.equal(folded.totals.calls, listed.totals.calls)
+  assert.equal(folded.totals.inputTokens, listed.totals.inputTokens)
+  assert.equal(summary.cacheHitRate, cacheHitRate({ inputTokens: summary.inputTokens, cacheReadTokens: summary.cacheReadTokens }), 'the summary’s hit rate is computed from its own sums')
+
+  // Only the session dimension folds: the other lists are short.
+  const byWorkspace = buildBill({ snapshot: many, catalogue: catalogue(), by: 'workspace', range: 'month', fold: true, now: SEPTEMBER })
+  assert.equal(byWorkspace.fold, null)
+  assert.equal(byWorkspace.rows.length, 1)
+
+  // A list where everything qualifies is left as it is: a summary that swallowed the list
+  // would hide it rather than shorten it.
+  const allSmall = snapshot({
+    sessions: [{ sessionId: 's1', cwd: 'D:\\proj', title: '唯一一次', calls: 1 }],
+    usage: [usage('2026-09-11', 's1', 'openai-official/gpt-6-astra', counters(10_000, 0, 0), counters(0, 0, 0), 1)],
+  })
+  const alone = buildBill({ snapshot: allSmall, catalogue: catalogue(), by: 'session', range: 'month', fold: true, now: SEPTEMBER })
+  assert.equal(alone.rows.length, 1)
+  assert.equal(alone.fold, null)
+  assert.equal(alone.rows[0].folded, undefined, 'the one session keeps its name')
+
+  // And the thresholds are configurable.
+  const nothing = buildBill({ snapshot: many, catalogue: catalogue(), by: 'session', range: 'month', fold: true, smallSessionCost: 0, smallSessionCalls: 0, now: SEPTEMBER })
+  assert.equal(nothing.fold, null, 'nothing is under zero')
+  const everything = buildBill({ snapshot: many, catalogue: catalogue(), by: 'session', range: 'month', fold: true, smallSessionCost: 1000, smallSessionCalls: 0, now: SEPTEMBER })
+  assert.equal(everything.fold, null, 'everything qualifies, so the list is left as it is')
+  assert.equal(everything.rows.length, 3, 'and every session keeps its name')
 })
 
 test('the dimensions and ranges on offer are the documented ones', () => {

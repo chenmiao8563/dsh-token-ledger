@@ -7,7 +7,7 @@ point of this file is to be checkable and to state its own gaps.
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-09-12 (0.7.1, 0.7.0, 0.6.0 and 0.5.0; the 0.4.0 runs below were on 2026-09-10) |
+| Date | 2026-09-13 (0.8.0; the 0.7.x and 0.6.0 runs below were on 2026-09-12) |
 | OS | Windows (win32) |
 | Node.js | v24.18.0 |
 | DSH | 0.1.2-rc.1 (packaged desktop build) |
@@ -15,7 +15,7 @@ point of this file is to be checkable and to state its own gaps.
 
 ## Test suite
 
-`npm run test:single-process` — **283 tests in 14 files, all passing**, with no
+`npm run test:single-process` — **288 tests in 14 files, all passing**, with no
 dependencies to install and no network. (That is the same suite as `npm test`;
 the per-file process isolation Node uses by default cannot `spawn` on this
 machine, so the isolation-free runner is the one used here.) The
@@ -30,11 +30,11 @@ reach the real one:
 | `test/plugin.test.mjs` | 21 | the host half against a Cordis stand-in: backfill, fork vs resume, live folding, restart cursors, the working directory read from the session header rather than from the sequenced events, `/tokens` variants, degraded services, config overrides, all three routes and their disposal, the startup refresh, `rates: false`, and a cached catalogue served to a later host with no network |
 | `test/session-log.test.mjs` | 7 | Zstandard frame walking: exact round trips, multi-frame files, truncation rejection, torn JSONL lines |
 | `test/overview.test.mjs` | 10 | the pure overview projection: ranges, local-day boundaries, cache hit rate, model rows |
-| `test/bill.test.mjs` | 25 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by provider/model/workspace/session with a session labelled `workspace/title` and a model labelled by the route it recorded, each range including `today` and "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers, a plan allocated across rows so that every grouping's rows sum to its own total, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, the CSV's shape **and its byte-order mark**, and a Chinese session name surviving the file byte for byte |
-| `test/route.test.mjs` | 40 | all three routes: the loopback and origin guard, unsupported methods, the bill's grouping and range lists with their fallbacks (one section per request, twenty for an export), the CSV download and its filename, the overview's per-period costs and its degradation when there are no prices, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 paths |
+| `test/bill.test.mjs` | 27 | the pure bill: name/version model joins and the refusals (a different version is a different model; a tie between two vendors is refused rather than guessed), per-period pricing against one price row, grouping by provider/model/workspace/session with a session labelled `workspace/title` and a model labelled by the route it recorded, each range including `today` and "everything", conversion and the dollars fallback when there is no rate, an unpriced model listed rather than charged at zero, plan amortization over the covered days, a plan replacing the usage it covers, a plan allocated across rows so that every grouping's rows sum to its own total, a plan that has not started leaving its vendor's usage billable, a hand-written config entry that is not an object being skipped rather than fatal, the CSV's shape **and its byte-order mark**, and a Chinese session name surviving the file byte for byte |
+| `test/route.test.mjs` | 41 | all three routes: the loopback and origin guard, unsupported methods, the bill's grouping and range lists with their fallbacks (one section per request, twenty for an export), the CSV download and its filename, the overview's per-period costs and its degradation when there are no prices, and for the write half the JSON content-type requirement, malformed and oversized bodies, rejected patches, and the 500 paths |
 | `test/rates.test.mjs` | 27 | the pure pricing module: per-token to per-million scaling, newest-per-vendor selection for both sources, the curated vendor cap and its order, alias exclusion, the per-vendor provider-id mapping, own-models-before-hosted ordering, zero-price flagging, the FX parse, hand-entered values outranking fetched ones, orphan overrides, the adopt/keep decision, and the input validator |
 | `test/rates-service.test.mjs` | 13 | fetch, cache, schedule and source selection: a failed refresh keeps the last good value, overrides survive a restart, an invalid patch changes nothing, the timer runs and stops, every transport fault is reported instead of thrown, each source parses its own payload, an unknown source falls back, and a five-megabyte body is a real response rather than an attack |
-| `test/client.test.mjs` | 54 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, all three views' rendering logic, the overview's estimated cost per range and per day (including the no-prices dash), the bill's four stacked sections with a period each, its export links and its per-section failure, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that each view reads its route only when it is opened |
+| `test/client.test.mjs` | 56 | the browser half through a stand-in loader: the module wrapper, the registration contract, formatting, heat levels, series slicing, all three views' rendering logic, the overview's estimated cost per range and per day (including the no-prices dash), the bill's four stacked sections with a period each, its export links and its per-section failure, the currency conversion and the USD fallback, per-vendor provenance, peak and off-peak rows, the bundled vendor marks, the column geometry that keeps model names visible, the zero-price marking, the patches each editor sends when its button is clicked, and that each view reads its route only when it is opened |
 | `test/vendor-prices.test.mjs` | 9 | the vendor pricing-page adapters: the HTML helpers, a price written as `0.15元` and as `输入：0.5元`, DeepSeek's merged label cells and both time-of-day columns, Z.ai's storage column that sometimes says "Limited-time Free", Tencent's label-embedded prices, and a row per period |
 | `test/client-render.test.mjs` | 21 | the same views under the real React, asserting the actual markup, the bill's four cards, twenty period tabs, export URLs and money columns, and that the library raises no complaint |
 | `test/providers.test.mjs` | 7 | the provider display names: the `providers:` block read out of a plugin-scoped settings file, quotes and comments and `~`-escaped names, several blocks merged, a name never guessed from a model list, a missing or unreadable file degrading to the provider id, and the cache window that keeps a poll from re-reading the file |
@@ -892,6 +892,46 @@ replicated (it was, and the fixture then folded correctly through the CLI), copy
 real logs proved both cheaper and stronger. A side finding from that attempt: a boot
 that fails to bind its port prints nothing at all, which cost some time; a port that a
 previous host still holds looks exactly like a plugin that failed to load.
+
+## The summarised session list, 0.8.0 — measured on a real ledger
+
+The rule (under ¥1 **or** fewer than 10 calls) was chosen by running candidate rules over
+this machine's real bill rather than by taste, and then verified through a real host on the
+same ledger. Both halves of the question matter: how short the list becomes, and what the
+summary row absorbs.
+
+| Range | Sessions | Rows shown | Summarised | Their money | Share of the bill |
+| ----- | -------- | ---------- | ---------- | ----------- | ----------------- |
+| month | 50 | 30 | 21 | ¥7.67 | 4.3% |
+| week | 31 | 20 | 12 | ¥6.76 | 6.3% |
+| all | 74 | 36 | 39 | ¥7.75 | 3.8% |
+| today | 1 | 1 | — | — | — (one session: the list is not shortened) |
+
+What the candidates would have done to the all-time list, which is why ¥1/10 was chosen:
+
+```
+cost < 1 且 calls < 10   → 折叠 14 行（剩 60）  汇总 ¥1.90（0.3%）
+cost < 1 或 calls < 10   → 折叠 37 行（剩 37）  汇总 ¥12.83（2.2%）   ← 采用
+cost < 5 或 calls < 20   → 折叠 56 行（剩 18）  汇总 ¥60.75（10.6%）  ← 隐藏太多钱
+```
+
+The most expensive row the chosen rule hides is **¥0.95** (29 calls), so nothing material
+disappears; a looser rule would put ¥60 of an all-time bill behind one line.
+
+The arithmetic was checked in the same run, through the host:
+
+```
+GET /api/token-ledger/bill?by=session&range=all&fold=small  -> 36 rows, fold {count: 39, costBelow: 1, callsBelow: 10, currency: CNY}
+GET /api/token-ledger/bill?by=session&range=all             -> 74 rows, fold: null
+  totals identical (¥203.87), and the folded rows still sum to it (203.87 == 203.87)
+  the summary row: 39 sessions, 734 calls, ¥7.75
+GET /api/token-ledger/bill?by=session&range=all&format=csv  -> 76 lines: a header, 74 sessions and a total; no `#small`
+```
+
+**Not verified:** the appearance of the summarised line (italic label, `汇总` badge, the
+note under the table). It is asserted in markup and in the real-React render tests, but no
+browser was available to look at it, and the geometry it sits in cannot be measured here
+either.
 
 ## Not verified
 

@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-13
+
+### Added
+
+- **The session list is summarised on the page, and only on the page.** A session asked
+  once and archived is a row that says nothing a reader needs, and a machine collects
+  hundreds of them: on this one, 74 sessions of which **39 are under ¥1 or fewer than 10
+  calls**. They now stand in one line — `其余 39 个低频会话（花费很少）`, badged `汇总`,
+  italic, with their own columns summed and their own hit rate — and a note under the table
+  says how many were summarised, what the rule was, and that the export still carries every
+  one. Measured through a real host on that ledger:
+
+  | 区间 | 会话 | 显示 | 汇总覆盖 | 汇总金额 | 占总额 |
+  | ---- | ---- | ---- | -------- | -------- | ------ |
+  | 本月 | 50 | 30 | 21 | ¥7.67 | 4.3% |
+  | 近 7 天 | 31 | 20 | 12 | ¥6.76 | 6.3% |
+  | 全部 | 74 | 36 | 39 | ¥7.75 | 3.8% |
+
+  The totals are identical in every range and every section's rows still add up to its
+  total, so the arithmetic is untouched — only the listing is shorter. **The export never
+  folds**: `format=csv` on the same ledger returns all 74 sessions, and the page's
+  `fold=small` is the only difference between the two requests.
+- **The standard, and why it is that one.** A session is small when it is **under ¥1** (in
+  the bill's currency) **or** **fewer than 10 calls** — cheap or barely used, since either
+  alone is a reason not to spend a line on it, and a session with three calls can be worth
+  a line while one with a hundred calls on a cheap model is not. The thresholds were chosen
+  against the real ledger rather than by taste: at ¥1/10 the most expensive row folded is
+  ¥0.95 and the folded money is 2–6% of the bill, where a looser ¥5/20 rule would fold ¥60
+  (10.6%) of an all-time bill. Two guards matter more than the rule: a row whose tokens
+  **could not be priced** is never folded (its zero is ignorance, not thrift), and a list
+  where **every** row qualifies is left alone — a summary that swallows the list hides it
+  instead of shortening it.
+- `bill.smallSessionCost`, `bill.smallSessionCalls` and `bill.foldSmallSessions: false` in
+  the plugin config set the rule or turn folding off entirely. Only the session dimension
+  folds: the workspace, model and provider lists are a handful of rows each.
+
+### Changed
+
+- **The bill's name column keeps its cap (360px).** The cap had been replaced in the working
+  tree with `1fr`, which puts the column back to eating the card's spare width — half of it
+  now, because the shared-columns layout adds an empty trailing track — and that is the gap
+  the previous release removed. The cap is restored, the floor kept at the 80px it was set
+  to, and 360px is measured rather than guessed: on this ledger the session labels run p50
+  232px, p90 321px, max 371px, so the cap clips only the longest handful, and every name
+  keeps its full text in the tooltip.
+
 ## [0.7.2] - 2026-09-12
 
 ### Changed
@@ -602,7 +648,8 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.6.0...v0.7.0

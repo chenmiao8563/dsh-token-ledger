@@ -580,6 +580,38 @@ function billSnapshot() {
   }
 }
 
+/**
+ * A snapshot with three sessions: two asked once, one that did real work.
+ *
+ * The prices in {@link billCatalogue} are USD 1/2 per million, so the two small sessions
+ * cost well under a yuan and the third costs tens of them.
+ *
+ * @returns {object} the snapshot.
+ */
+function foldingSnapshot() {
+  const row = (sessionId, tokens, calls, title) => {
+    const counters = { inputTokens: tokens, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: tokens, reasoningTokens: 0 }
+    return {
+      date: BILL_DAY,
+      sessionId,
+      model: 'acme-official/one',
+      calls,
+      ...counters,
+      peak: { ...counters },
+      offPeak: { ...counters, inputTokens: 0, totalTokens: 0 },
+    }
+  }
+  return {
+    version: 5,
+    sessions: [
+      { sessionId: 's1', cwd: 'D:\\proj', title: '问一次就归档', calls: 1 },
+      { sessionId: 's2', cwd: 'D:\\proj', title: '也问了一次', calls: 2 },
+      { sessionId: 's3', cwd: 'D:\\proj', title: '真正干活的', calls: 40 },
+    ],
+    usage: [row('s1', 10_000, 1), row('s2', 20_000, 2), row('s3', 8_000_000, 40)],
+  }
+}
+
 /** The bill route over deterministic dependencies. */
 function billRoute(options = {}) {
   return createBillRoute({
@@ -808,6 +840,47 @@ test('the overview carries what each of its periods cost', () => {
   )
   assert.equal(broken.cost.priced, false)
   assert.equal(errors.length, 1)
+})
+
+test('the page asks to fold the session list, the export does not', () => {
+  // The same route, two readers: a page wants a list short enough to read, a file wants
+  // every row. The flag is the whole difference between the two requests, and the total
+  // is the same either way — a shortened list is not a smaller bill.
+  const route = billRoute({ snapshot: () => foldingSnapshot() })
+  const asked = JSON.parse(call(route, makeBillReq({ url: `${BILL_PATH}?by=session&range=month&fold=small` })).body)
+  const plain = JSON.parse(call(route, makeBillReq({ url: `${BILL_PATH}?by=session&range=month` })).body)
+  assert.equal(plain.sections[0].rows.length, 3, 'without the flag every session is listed')
+  assert.equal(plain.sections[0].fold, null)
+  assert.equal(asked.sections[0].rows.length, 2, 'with it the small ones are summarised')
+  assert.deepEqual(asked.sections[0].fold, { count: 2, costBelow: 1, callsBelow: 10, currency: 'CNY' })
+  assert.equal(asked.sections[0].rows.filter((row) => row.folded === true).length, 1)
+  assert.equal(asked.sections[0].totals.totalCost, plain.sections[0].totals.totalCost)
+  // A CSV export ignores the flag even when a hand-written URL carries it, because a
+  // file must not depend on a query parameter to be complete.
+  const csv = call(route, makeBillReq({ url: `${BILL_PATH}?by=session&range=month&format=csv` })).body
+  assert.equal(csv.split('\r\n').filter((line) => line.startsWith('session,month,')).length, 4, 'three sessions and the total')
+  assert.ok(!csv.includes('#small'))
+
+  // The config can turn it off, and then nothing folds however the page asks.
+  const off = createBillRoute({
+    snapshot: () => foldingSnapshot(),
+    catalogue: billCatalogue,
+    foldSmallSessions: false,
+    options: { now: () => new Date(2026, 8, 30, 12, 0, 0) },
+  })
+  const refused = JSON.parse(call(off, makeBillReq({ url: `${BILL_PATH}?by=session&range=month&fold=small` })).body)
+  assert.equal(refused.sections[0].rows.length, 3)
+  assert.equal(refused.sections[0].fold, null)
+
+  // The thresholds are configurable, and are the config's rather than the caller's.
+  const strict = createBillRoute({
+    snapshot: () => foldingSnapshot(),
+    catalogue: billCatalogue,
+    smallSession: { cost: 0, calls: 0 },
+    options: { now: () => new Date(2026, 8, 30, 12, 0, 0) },
+  })
+  const none = JSON.parse(call(strict, makeBillReq({ url: `${BILL_PATH}?by=session&range=month&fold=small` })).body)
+  assert.equal(none.sections[0].rows.length, 3, 'nothing is under zero')
 })
 
 test('the rates guard matches the overview guard, on both reads and writes', async () => {

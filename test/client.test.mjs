@@ -1508,7 +1508,9 @@ test('prices and the bill are fetched only when their view is opened', () => {
     const bill = runEffect('bill', { status: 'loading', data: null, error: null }, 2)
     assert.deepEqual(calls.map((call) => call.url), [
       '/api/token-ledger/bill?by=workspace&range=month',
-      '/api/token-ledger/bill?by=session&range=month',
+      // The session list is the one long enough to be summarised, so it is the one that
+      // asks for it. The export links never do — a file is read for its detail.
+      '/api/token-ledger/bill?by=session&range=month&fold=small',
       '/api/token-ledger/bill?by=model&range=month',
       '/api/token-ledger/bill?by=vendor&range=month',
     ])
@@ -1634,13 +1636,13 @@ function billStates(data = billPayload(), states = {}) {
  *
  * @param {object} module - the loaded client module.
  * @param {object} bills - the per-grouping fetch states.
- * @param {{ ranges?: object, onRange?: Function }} [hooks] - the current periods and their setter.
+ * @param {{ ranges?: object, onRange?: Function, t?: Function }} [hooks] - the current periods, their setter, and a translator when a test needs real sentences rather than keys.
  * @returns {unknown} the expanded tree.
  */
 function renderBillView(module, bills, hooks = {}) {
   return expand(
     module.exports.BillView({
-      t: fakeT(),
+      t: hooks.t ?? fakeT(),
       bills,
       ranges: hooks.ranges ?? Object.fromEntries(BILL_DIMS.map((dim) => [dim, 'month'])),
       onRange: hooks.onRange ?? (() => {}),
@@ -1699,6 +1701,97 @@ test('the export at the top carries every grouping over every period', () => {
   assert.equal(headerRows.length, 1)
   assert.equal(String(headerRows[0].props.className), 'tl-row tl-row-head')
   assert.equal(countByClass(headerRows[0], 'tl-bill-actions'), 1, 'the export is on it')
+})
+
+test('a summarised session line names itself, says it is a summary, and the export is not shortened', () => {
+  // The host folds the small sessions and hands over a row with no name — it has no
+  // dictionary — so the page names it, in the reader's language, from the count. The
+  // export links carry no `fold`, because a downloaded file is read for its detail.
+  const { module } = loadWithSection()
+  const payload = billPayload({
+    sections: [
+      {
+        by: 'session',
+        range: { kind: 'month', from: '2026-03-01', to: '2026-03-31' },
+        currency: 'CNY',
+        fold: { count: 12, costBelow: 1, callsBelow: 10, currency: 'CNY' },
+        rows: [
+          {
+            key: 'proj/真正干活的',
+            label: 'proj/真正干活的',
+            sublabel: 'session-1 · D:\\proj',
+            plan: false,
+            covered: false,
+            calls: 40,
+            inputTokens: 8_000_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            totalTokens: 8_000_000,
+            cacheHitRate: 0,
+            cost: 56,
+            usageCost: 56,
+            planCost: 0,
+            unpricedTokens: 0,
+            modelCount: 1,
+            sessionCount: 1,
+          },
+          {
+            key: '#small',
+            label: null,
+            sublabel: null,
+            plan: false,
+            covered: false,
+            folded: true,
+            foldedCount: 12,
+            calls: 30,
+            inputTokens: 300_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            totalTokens: 300_000,
+            cacheHitRate: 0,
+            cost: 2.1,
+            usageCost: 2.1,
+            planCost: 0,
+            unpricedTokens: 0,
+            modelCount: null,
+            sessionCount: 12,
+          },
+        ],
+        totals: { calls: 70, inputTokens: 8_300_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 8_300_000, cacheHitRate: 0, cost: 58.1, usageCost: 58.1, subscriptionCost: 0, totalCost: 58.1, unpricedCost: false },
+      },
+    ],
+  })
+  const tree = renderBillView(module, billStates(payload), {
+    // The keys name the sentence; the numbers travel inside it, so a language can put
+    // them where its word order wants them.
+    t: (key) =>
+      ({
+        billFoldedSessions: '其余 {n} 个低频会话',
+        billFoldedNote: '汇总 {n} 个：每个低于 {cost} 或少于 {calls} 次，导出的 CSV / JSON 仍是完整明细',
+      })[key] ?? key,
+  })
+  const section = cardsOf(tree)[0]
+  const rows = findAllByClass(section, 'tl-bill-row')
+  assert.equal(rows.length, 2)
+
+  // The summary line: named from the count, badged, and its columns are its own sums.
+  const summary = rows[1]
+  assert.ok(String(summary.props.className).includes('tl-bill-folded'), 'it does not read as one more session')
+  assert.ok(hasText(collectText(summary), '其余 12 个低频会话'), 'the page names it from the count')
+  assert.ok(hasText(collectText(summary), 'billFoldedBadge'))
+  assert.ok(hasText(collectText(summary), '¥2.10'), 'and its own money')
+  assert.ok(!hasText(collectText(summary), 'billPayAsYouGo'), 'it is not mistaken for the pay-as-you-go line')
+
+  // The note says what the rule was and that the export is complete.
+  const note = collectText(section).find((text) => text.includes('汇总 12 个'))
+  assert.ok(note !== undefined, 'the section says the list was shortened')
+  assert.ok(note.includes('¥1.00') && note.includes('少于 10 次'), note)
+
+  // And the export links still carry every grouping over every period, with no fold.
+  const links = findAllByClass(tree, 'tl-btn').map((link) => link.props.href)
+  assert.ok(links.every((href) => !href.includes('fold')), links.join(' '))
 })
 
 test('the bill table shows a row per group, both halves of the input and the cost', () => {

@@ -269,6 +269,16 @@ period**, so this month by workspace can sit above today by model.
   two rows, which is the question a vendor bill exists to answer.
 - **Five periods per section**: this month, this year, the last 7 days, today, or
   everything, using the same trailing-window definitions as the overview.
+- **The session list is summarised; the file is not.** A session asked once and archived
+  is a row that says nothing, and a machine collects hundreds of them, so the sessions
+  that are **cheap or barely used — under ¥1, or fewer than 10 calls** — stand in one
+  line on the page (`其余 N 个低频会话`, badged `汇总`, with their columns summed). The
+  total does not move: the rows still add up to it. A note under the table says how many
+  were summarised and what the rule was, and **the export always lists every session** —
+  `format=csv` is the complete record. Two things are never folded: a session whose
+  tokens could not be priced, and a list where every row qualifies.
+  `bill.smallSessionCost`, `bill.smallSessionCalls` and `bill.foldSmallSessions: false`
+  change the rule or turn it off. Only the session dimension folds.
 - **One export for all of it, top right.** CSV or JSON, carrying every grouping over
   every period, with the currency on every row and **one `TOTAL` per section**. There
   is deliberately no grand total: the periods overlap, and adding today to this week
@@ -349,6 +359,12 @@ Override the composition entry by its `id`:
         startedAt: '2026-09-01'          # optional: not billed before this day
         endedAt: null                    # optional: not billed after this day
         note: null                       # optional: free text, shown with the plan
+    # How the page shortens the session list. The export is never shortened, so these
+    # only change what is on screen.
+    # bill:
+    #   foldSmallSessions: true          # default: true — false lists every session on the page too
+    #   smallSessionCost: 1              # default: 1, in the bill's currency
+    #   smallSessionCalls: 10            # default: 10
 ```
 
 `rates: false` disables the pricing feature's networking entirely and leaves
