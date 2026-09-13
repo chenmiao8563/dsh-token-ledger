@@ -89,8 +89,20 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ''
         run: |
+          # A failed step's log needs a GitHub sign-in to read, which is a poor
+          # place to put the one line that says what went wrong. On failure the
+          # registry's own words are repeated as an annotation, and annotations
+          # are readable from the run page by anyone.
+          set +e
           npm --version
-          npm publish --access public
+          npm publish --access public 2>&1 | tee "$RUNNER_TEMP/publish.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            reason=$(grep -E '^npm (error|notice|warn)' "$RUNNER_TEMP/publish.log" \
+              | tail -n 12 | tr '\n' '|' | cut -c1-800)
+            echo "::error title=npm publish failed::(npm $(npm --version), OIDC request url ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}) ${reason}"
+          fi
+          exit "$status"
 
       # The release needs a tarball whether or not this run published one. When
       # the version is already on the registry the Publish step is skipped, so
