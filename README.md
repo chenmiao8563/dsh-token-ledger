@@ -4,7 +4,7 @@ Transparent, auditable token accounting for [DeepSeek Harness](https://github.co
 
 [![CI](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@chenmiao8563/dsh-token-ledger.svg)](https://www.npmjs.com/package/@chenmiao8563/dsh-token-ledger)
-[![license](https://img.shields.io/npm/l/dsh-token-ledger.svg)](./LICENSE)
+[![license](https://img.shields.io/npm/l/@chenmiao8563/dsh-token-ledger.svg)](./LICENSE)
 
 [English](README.md) | [中文](README.zh.md)
 
@@ -30,7 +30,7 @@ scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
 If you only want a pretty chart, there are a dozen plugins for that. This one is
 for when you need to *defend* the number.
 
-Since 0.6 the settings page has three tabs: **Overview** (the ledger, with what each
+Since 0.5 the settings page has three tabs: **Overview** (the ledger, with what each
 period cost), **Rates** (a price list for each vendor's newest models, with the live
 USD/CNY rate) and **Bill** (the same usage turned into money — four groupings stacked
 over five periods each, exportable as CSV or JSON in one file). The bill names the
@@ -41,7 +41,7 @@ checked. See [Settings page](#settings-page).
 
 | Property | Why it matters |
 | --- | --- |
-| **Zero dependencies, zero peer dependencies** | Nothing to resolve, so a version drift in a DSH package cannot break the install. |
+| **Nothing is installed for you** | No runtime dependencies, and every declared peer is an optional host package — so a version drift in a DSH package cannot pull a second copy of the harness into your profile. |
 | **Zero install scripts** | `dsh plugin add` from a git URL works immediately — pnpm has no build to block and no `allowBuilds` entry to add. |
 | **Only `node:` imports** | The host half loads from any profile (web, desktop, headless, TUI) without resolving a single package. |
 | **No model-facing surface** | It registers no prompt section, no message and no tool, so it cannot change a request prefix or hurt KV-cache reuse. |
@@ -80,6 +80,42 @@ In the conversation, `/tokens` prints the ledger:
 ```
 
 The ledger is written to `<DSH_HOME>/token-ledger/ledger.json`.
+
+### What DSH it needs
+
+**DSH `^0.1.2-rc.1`** — 0.1.2-rc.1 is the version this was built and tested against,
+and that is what the range's floor says. The `^` puts the ceiling at `0.2.0`: the API
+surface used here was inspected across the 0.1.2 line, not tested against a future
+one.
+
+The requirement is declared the way the ecosystem actually reads it — as
+`peerDependencies` on the five host packages the two halves bind to:
+
+| Peer | Why this plugin names it |
+| --- | --- |
+| `@deepseek-ai/dsh-session-persistence` | It provides `sessionPersistence`, which is where the ledger's usage comes from. |
+| `@deepseek-ai/dsh-commands` | It provides `commands`, which registers `/tokens`. |
+| `@deepseek-ai/dsh-host-webserver` | It provides `webServer`, which serves the three settings routes. |
+| `@deepseek-ai/dsh-client-locale` | The browser half injects it for the translated labels. |
+| `@deepseek-ai/dsh-client-ui-settings-general` | The browser half injects it to add its section to the settings sidebar. |
+
+Every one is **optional**, and that is deliberate rather than a hedge. DSH does not
+hoist host packages into a profile's `node_modules`, so a required peer would report
+an unmet dependency on every install and mean nothing. Optional is also what keeps the
+declaration honest about this plugin's own behaviour: a profile with no web server
+skips the settings page and keeps `/tokens` and the CLI, and a headless or TUI profile
+never has the client packages at all.
+
+What makes the declaration useful is that DSH resolves it against the install that is
+actually running. Its profile checker reads a peer from the plugin's own `node_modules`
+first, then the profile tree, then **the DSH installation itself**
+(`node_modules/dshmarket/lib/check.js`), and compares the result to the range above —
+so an unsupported harness is reported instead of silently mounting. Earlier versions of
+this package declared `dsh.compatibility.dsh` instead, which nothing in DSH reads; 1.0
+removed it rather than leave a field that looks like a promise and is not one.
+
+The declarations cost a consumer nothing: optional peers are not installed, and the
+package still ships with no runtime dependencies and no install scripts.
 
 ## Counting rules
 
@@ -392,9 +428,10 @@ wants; the rates page still works.
 
 - **Node:** ≥ 22.15.0 (the CLI decodes Zstandard frames). The host half itself
   needs nothing version-specific.
-- **DSH:** verified on `0.1.2-rc.1`. The surface used — `ctx.on`, `ctx.inject`,
-  `ctx.get`, `ctx.effect`, `commands.register`, and
-  `sessionPersistence.list()/inspect()` — is the same across the `0.1.2` line.
+- **DSH:** `^0.1.2-rc.1`, declared as optional peers on the five host packages it
+  binds to — see [What DSH it needs](#what-dsh-it-needs). Verified on `0.1.2-rc.1`. The
+  surface used — `ctx.on`, `ctx.inject`, `ctx.get`, `ctx.effect`, `commands.register`,
+  and `sessionPersistence.list()/inspect()` — is the same across the `0.1.2` line.
 - **Profiles:** any. There is no profile-specific code.
 - **Network:** the rates tab fetches prices and the USD rate over HTTPS. This is
   entirely optional: with no route to the internet the last fetched result is
@@ -414,7 +451,7 @@ The ledger file is left alone on purpose — delete
 
 ```bash
 npm install         # devDependencies only: react, react-dom, and the slot registry DSH runs
-npm test            # 284 tests in 14 files
+npm test            # 288 tests in 14 files
 npm run verify      # packaging invariants (dependency-free, no install scripts, no bare imports)
 ```
 
@@ -432,8 +469,9 @@ bundle and its `rev` (`d683dd523466`) untouched, while a restart changed the rev
 looking at came from before a fix, its timestamp will say so.
 
 The devDependencies are **test-only**. They are never installed for a consumer:
-the package ships with no dependencies, no peer dependencies and no install
-scripts, and `pnpm` does not install a dependency's devDependencies. They exist
+the package ships with no runtime dependencies and no install scripts, its peers are
+optional declarations that nothing fetches, and `pnpm` does not install a dependency's
+devDependencies. They exist
 so the browser half can be checked against the real thing — React renders it, so
 a hook-order or DOM-prop mistake fails instead of passing silently, and
 `@deepseek-ai/dsh-client-ui-slots` validates the registration against the very
@@ -445,26 +483,46 @@ and how, including the evidence behind the fork rule.
 
 ## Releasing
 
-npm requires two-factor authentication for every publish, so a version's first
-release is interactive:
+**A tag push publishes. No token is stored anywhere.**
 
 ```bash
-npm login
-npm publish --access public --otp=<six digits from your authenticator>
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-After that first publish, configure a **Trusted Publisher** for the package on
-npmjs.com (package → Settings → Trusted Publisher → GitHub Actions, repository
-`chenmiao8563/dsh-token-ledger`, workflow `release.yml`). OIDC cannot be set up
-before the package exists, which is why the first release is manual. From then
-on, a tag push publishes with no stored token at all:
+`release.yml` then runs the tests and the packaging checks, confirms the tag matches
+`package.json`, publishes over OIDC **trusted publishing**, attaches the tarball to a
+GitHub release, and asserts that the version is on the registry before it reports
+success — so a green run means published, not merely attempted.
 
-```bash
-git tag v0.1.1 && git push origin v0.1.1
-```
+That last assertion is not decoration. This pipeline failed on every tag from v0.5.0
+to v0.8.0 while printing `404 Not Found - PUT`, which names a missing package when the
+real problem is a missing credential, and the failure left the registry looking empty
+for a couple of minutes after a publish that had in fact worked. Two causes, both now
+guarded inside the workflow:
 
-`release.yml` skips the publish step when the version is already on the
-registry and creates the GitHub release regardless, so re-running it is safe.
+- **The npm CLI must be ≥ 11.5.1.** Node 22 ships npm 10, which cannot perform the
+  OIDC exchange at all. The workflow runs Node 24, and asserts the version in its log.
+- **`actions/setup-node`'s `registry-url` input must not be used.** It writes
+  `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into `.npmrc`, and npm reads
+  that line, concludes a credential is already configured, and skips trusted
+  publishing entirely — failing with `ENEEDAUTH`, which in a job that holds no
+  credential reads like "you forgot to log in". A step before the publish now fails
+  loudly if any `_authToken` line is present.
+
+For the npm side to accept it, the package needs a **Trusted Publisher** configured at
+npmjs.com (package → Settings → Trusted Publisher → GitHub Actions) with repository
+`chenmiao8563/dsh-token-ledger`, workflow `release.yml`, and **no environment** —
+an environment name that the workflow does not declare does not match, and the
+registry answers only `OIDC token exchange error - package not found`.
+
+Before trusted publishing existed, a version's first release was published by hand
+with `npm publish --access public --otp=<six digits>`, because OIDC cannot be
+configured for a package that does not exist yet. That path still works and still
+requires a granular token with 2FA bypass, but it produces no provenance attestation,
+and it is the path whose expired token started the v0.8.0 investigation. Prefer the tag.
+
+Re-running a release is safe: the publish step is skipped when the version is already
+on the registry, and the GitHub release is only created when it does not already exist.
 
 ## License
 

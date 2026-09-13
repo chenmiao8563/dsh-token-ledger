@@ -1,6 +1,6 @@
 {
   "name": "@chenmiao8563/dsh-token-ledger",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "description": "Transparent, auditable token accounting for DeepSeek Harness: a restart-safe ledger over the durable session log, a CLI that recomputes it from raw logs and diffs the result, and a bill — by workspace, session, model or provider, exportable as CSV or JSON.",
   "keywords": [
     "dsh",
@@ -32,6 +32,9 @@
     "./bill": "./lib/bill.js",
     "./csv": "./lib/csv.js",
     "./providers": "./lib/providers.js",
+    "./rates": "./lib/rates.js",
+    "./rates-service": "./lib/rates-service.js",
+    "./vendor-prices": "./lib/vendor-prices.js",
     "./route": "./lib/route.js",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
@@ -65,8 +68,31 @@
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-locale": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings-general": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-commands": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.2-rc.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-locale": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings-general": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-commands": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session-persistence": {
+      "optional": true
+    }
+  },
   "dsh": {
-    "pluginType": "feature",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -76,9 +102,6 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings-general"
       ]
-    },
-    "compatibility": {
-      "dsh": ">=0.1.2-alpha.1"
     }
   },
   "repository": {

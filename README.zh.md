@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/chenmiao8563/dsh-token-ledger/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@chenmiao8563/dsh-token-ledger.svg)](https://www.npmjs.com/package/@chenmiao8563/dsh-token-ledger)
-[![license](https://img.shields.io/npm/l/dsh-token-ledger.svg)](./LICENSE)
+[![license](https://img.shields.io/npm/l/@chenmiao8563/dsh-token-ledger.svg)](./LICENSE)
 
 [English](README.md) | 中文
 
@@ -37,7 +37,7 @@ scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
 
 | 特性 | 为什么重要 |
 | --- | --- |
-| **零依赖、零 peer 依赖** | 没有东西需要解析，DSH 内部包的版本漂移搞不坏安装。 |
+| **没有任何东西会被装给你** | 无运行时依赖；声明的 peer 全都是可选宿主包——DSH 内部包的版本漂移不可能把第二份 harness 拖进你的 profile。 |
 | **零安装脚本** | 直接用 git URL `dsh plugin add` 即可——pnpm 没有构建要拦，你也不必去 `allowBuilds` 里加白名单。 |
 | **只 import `node:`** | 宿主端可以从任意 profile（web / desktop / headless / TUI）加载，不需要解析任何包。 |
 | **不碰模型可见面** | 它不注册任何提示词段、消息或工具，因此不会改变请求前缀，也不会损害 KV cache 复用。 |
@@ -76,6 +76,35 @@ dsh --profile web --dump-config | grep token-ledger
 ```
 
 账本写在 `<DSH_HOME>/token-ledger/ledger.json`。
+
+### 需要的 DSH 版本
+
+**DSH `^0.1.2-rc.1`** —— 0.1.2-rc.1 是本插件开发与实测所针对的版本，也就是这个区间的下界。
+`^` 把上界放在 `0.2.0`：这里用到的接口面是在 0.1.2 这一线上**看过**的，不是对未来版本**测过**的。
+
+这个要求按生态里真正会被读取的方式声明——写成对两半各自绑定到的五个宿主包的
+`peerDependencies`：
+
+| Peer | 为什么要写它 |
+| --- | --- |
+| `@deepseek-ai/dsh-session-persistence` | 它提供 `sessionPersistence`，账本的用量数据来自这里。 |
+| `@deepseek-ai/dsh-commands` | 它提供 `commands`，`/tokens` 靠它注册。 |
+| `@deepseek-ai/dsh-host-webserver` | 它提供 `webServer`，设置页那三个路由靠它提供。 |
+| `@deepseek-ai/dsh-client-locale` | 浏览器半边注入它来拿翻译后的文案。 |
+| `@deepseek-ai/dsh-client-ui-settings-general` | 浏览器半边注入它，把分区加进设置侧边栏。 |
+
+五个都是**可选**（optional），这是刻意的而不是含糊其辞：DSH 不会把宿主包提升进 profile 的
+`node_modules`，所以写成必需 peer 只会在每次安装时报告一个"未满足"、却什么也不说明。可选也正是
+插件自身行为的如实描述——没有 web 服务器的 profile 少掉设置页，`/tokens` 与 CLI 照常可用；
+headless 或 TUI profile 则根本没有那两个客户端包。
+
+这个声明之所以有用，是因为 DSH 会拿**实际在跑的那套安装**去解析它：profile 检查器先看插件自己的
+`node_modules`，再看 profile 目录树，最后**回落到 DSH 安装目录本身**
+（`node_modules/dshmarket/lib/check.js`），把解析到的版本与上面的区间比对——于是不受支持的
+harness 会被报出来，而不是悄悄挂载。早先的版本声明的是 `dsh.compatibility.dsh`，而 DSH 里
+没有任何代码读它；1.0 把它删掉，而不是留一个看起来像承诺、实际不是的字段。
+
+这些声明对消费者零成本：可选 peer 不会被安装，包本身依旧没有运行时依赖、没有安装脚本。
 
 ## 计数规则
 
@@ -260,7 +289,8 @@ dsh-token-ledger export  [选项]       导出 CSV 与 JSON
 写入那半边还额外要求 JSON 内容类型（跨站表单发不出这种类型），并把请求体限制在 256 KiB。
 
 它需要带 web 服务器的 profile（`web` 或 `desktop`）。没有的话 `/tokens` 与 CLI
-照常可用，分区会明确说明而不是直接失败。
+照常可用，分区会明确说明而不是直接失败。注意手工填价格是在**那个页面上**填的：目前
+还没有等价命令行入口，所以 headless profile 能读用量账本，但没法录入价格。
 
 三个视图都**刻意不**通过设置命名空间下发：那需要 schema（一个真实依赖，而本包零依赖），
 而且每次防抖都会用可推导、可重放的数据重写一遍 `settings.yaml`。
@@ -319,8 +349,10 @@ dsh-token-ledger export  [选项]       导出 CSV 与 JSON
 ## 兼容性
 
 - **Node：** ≥ 22.15.0（CLI 需要解码 Zstandard 帧）。宿主端本身没有版本相关要求。
-- **DSH：** 在 `0.1.2-rc.1` 上验证。所用到的接口面——`ctx.on`、`ctx.inject`、`ctx.get`、
-  `ctx.effect`、`commands.register`、`sessionPersistence.list()/inspect()`——在 `0.1.2` 线上一致。
+- **DSH：** `^0.1.2-rc.1`，以对五个宿主包的可选 peer 形式声明——见
+  [需要的 DSH 版本](#需要的-dsh-版本)。在 `0.1.2-rc.1` 上验证过。所用到的接口面——
+  `ctx.on`、`ctx.inject`、`ctx.get`、`ctx.effect`、`commands.register`、
+  `sessionPersistence.list()/inspect()`——在 `0.1.2` 线上一致。
 - **Profile：** 任意。没有 profile 相关代码。
 - **网络：** 费率页会通过 HTTPS 取价格与美元汇率，但这完全是可选的：没有外网时仍然
   提供本机缓存的上次结果，手动填写的值照常可用，`rates: false` 则连请求都省掉。
@@ -337,42 +369,68 @@ dsh plugin --profile web remove @chenmiao8563/dsh-token-ledger
 
 ```bash
 npm install         # 两个 devDependency：react 与 react-dom，供渲染测试使用
-npm test            # 96 个测试
+npm test            # 288 个测试，14 个文件
 npm run verify      # 打包不变式（零依赖、无安装脚本、无裸模块说明符）
 ```
 
 `npm test` 使用 Node 内置测试运行器。在禁止逐文件 spawn 子进程的受限环境里，
 改用 `npm run test:single-process`。
 
-React **只是 devDependency**，消费者永远不会安装它：本包不带任何依赖、任何 peer
-依赖、任何安装脚本，而 pnpm 不会为依赖安装其 devDependencies。它在这里的作用是让
+React **只是 devDependency**，消费者永远不会安装它：本包不带任何运行时依赖、不带任何
+安装脚本，声明的 peer 全是可选声明、没有任何东西会去抓取，而 pnpm 不会为依赖安装其
+devDependencies。它在这里的作用是让
 浏览器端能用**真库**渲染并断言——这能抓到替身抓不到的东西：hook 顺序违规与非法
 DOM 属性，React 会报出来，而手写的 `createElement` 会默默接受。没装它时这些渲染
 测试会带明确原因**跳过而不是失败**，所以全新克隆、无网络也能跑 `npm test`。
+
+**改动的生效方式。** 两半都是在插件**挂载时**读取的，所以改 `lib/index.js` **或**
+`lib/client.js` 都需要重启 DSH（或重载插件）——刷新页面不够，因为 bundle 的 `rev`
+在挂载时算定，URL 没变浏览器就继续用缓存那份。这是量出来的不是猜的：在隔离 host
+运行时，改 `lib/client.js` 之后被服务的 bundle 与它的 `rev`（`d683dd523466`）都纹丝不动；
+重启后 `rev` 变成 `f55ee321db50` 并提供了新内容。导出的是文件，所以如果你手上的那份
+来自某次修复之前，看时间戳就知道。
 
 实际验证了什么、怎么验证的（包括 fork 规则背后的证据）见
 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
 ## 发布
 
-npm 现在强制每次发布都要 2FA，所以一个版本的首发必须交互式完成：
+**打一个 tag 就是发布。不需要在任何地方存放 token。**
 
 ```bash
-npm login
-npm publish --access public --otp=<认证器里的 6 位数字>
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-首发之后，在 npmjs.com 上给这个包配 **Trusted Publisher**（包 → Settings →
-Trusted Publisher → GitHub Actions，仓库填 `chenmiao8563/dsh-token-ledger`，
-workflow 填 `release.yml`）。OIDC 没法在包存在之前配置，这就是首发必须手动的
-原因。配好之后，打 tag 即可发布，**不需要存放任何 token**：
+`release.yml` 会跑测试与打包检查、确认 tag 与 `package.json` 一致、用 OIDC
+**trusted publishing** 发布、把 tarball 挂到 GitHub Release 上，并在报告成功之前
+**断言该版本确实已在 registry 上**——所以绿色意味着已发布，而不只是尝试过。
 
-```bash
-git tag v0.1.1 && git push origin v0.1.1
-```
+最后这条断言不是装饰。这条流水线从 v0.5.0 到 v0.8.0 每个 tag 都失败，报的是
+`404 Not Found - PUT`——它说的是"包不存在"，而真正的问题是缺凭据；而且失败之后
+registry 会有几分钟看起来是空的，尽管发布其实已经成功。两个原因都已在 workflow 里
+加了防线：
 
-`release.yml` 会在版本已存在于 registry 时跳过发布步骤、但仍创建 GitHub
-Release，所以重复运行是安全的。
+- **npm CLI 必须 ≥ 11.5.1。** Node 22 自带 npm 10，根本做不了 OIDC 交换。workflow
+  跑在 Node 24 上，并把版本打进日志。
+- **不能用 `actions/setup-node` 的 `registry-url` 输入。** 它会往 `.npmrc` 写
+  `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`，npm 看到这一行就认定
+  "已有凭据"，直接跳过 trusted publishing，报 `ENEEDAUTH`——在一个本就不持有凭据的
+  任务里，这读起来像"你忘了登录"。发布前现在有一道步骤：只要 `.npmrc` 里出现
+  `_authToken` 就大声失败。
+
+npm 那边要接受它，需要在 npmjs.com 上给包配 **Trusted Publisher**（包 → Settings →
+Trusted Publisher → GitHub Actions），仓库填 `chenmiao8563/dsh-token-ledger`、
+workflow 填 `release.yml`、**Environment 留空**——填了一个 workflow 没有声明的
+environment 就匹配不上，registry 只会回一句
+`OIDC token exchange error - package not found`。
+
+在 trusted publishing 出现之前，一个版本的首发是用
+`npm publish --access public --otp=<认证器里的 6 位数字>` 手动发的，因为 OIDC 没法在包
+存在之前配置。那条路现在依然可用，也依然需要带 2FA bypass 的 granular token，
+但它**不产生 provenance 证明**，而且 v0.8.0 那次排查正是从这条路走起——从一个过期的
+token 开始。优先用打 tag。
+
+重复运行是安全的：版本已在 registry 上时跳过发布步骤，GitHub Release 只在不存在时创建。
 
 ## 许可证
 

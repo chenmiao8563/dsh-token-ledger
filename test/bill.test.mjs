@@ -633,8 +633,8 @@ test('the dimensions and ranges on offer are the documented ones', () => {
 })
 
 test('a session row is named by its workspace, and a model row by its vendor', () => {
-  assert.equal(workspaceName('E:\\bosc_project\\torchv-master'), 'torchv-master')
-  assert.equal(workspaceName('E:\\bosc_project\\torchv-master\\'), 'torchv-master')
+  assert.equal(workspaceName('E:\\work\\torchv-master'), 'torchv-master')
+  assert.equal(workspaceName('E:\\work\\torchv-master\\'), 'torchv-master')
   assert.equal(workspaceName('/home/me/proj'), 'proj')
   assert.equal(workspaceName(''), null)
   assert.equal(workspaceName(undefined), null)

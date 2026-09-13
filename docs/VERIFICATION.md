@@ -636,7 +636,7 @@ qwen               1,924   19,451,225    2,199,720   94.0%     CNY 63.98
 z-ai                 881   13,773,217    1,152,944   89.3%     CNY 53.55
 
 by workspace
-E:\bosc_project\torchv-master  2,218  165,436,946  1,231,026  48.6%  CNY 331.55
+<workspace>/torchv-master      2,218  165,436,946  1,231,026  48.6%  CNY 331.55
 …
 ```
 
@@ -719,9 +719,9 @@ vendor / month            cost     usageCost   planCost
   z-ai                    26.20    26.20       0
 
 workspace / month         cost     planCost    usageCost
-  E:\bosc_project\DB_ontology   71.47   42.29   80.43
-  D:\LLM\knowledge-base         40.85    5.84   42.09
-  E:\bosc_project\dsh行内部署    22.64    8.30   24.40
+  <workspace>/DB_ontology      71.47   42.29   80.43
+  <workspace>/knowledge-base   40.85    5.84   42.09
+  <workspace>/dsh-deploy       22.64    8.30   24.40
 ```
 
 ### The labels are DSH's own names
@@ -730,8 +730,8 @@ A session row is `workspace/title` with the DSH session title, and a model row i
 `vendor/model`:
 
 ```
-dsh行内部署/@2026-09-02-AI工作复盘.md 这是我   · session-61bd1519-… · E:\bosc_project\dsh行内部署
-DB_ontology/# 任务书：把样例数据建成 Onto…    · session-d818967e-… · E:\bosc_project\DB_ontology
+<workspace>/dsh-deploy/<session title>       · session-61bd1519-… · <workspace>/dsh-deploy
+<workspace>/DB_ontology/<session title>     · session-d818967e-… · <workspace>/DB_ontology
 deepseek/DeepSeek-V4.1-Flash                  cost 79.60
 qwen/Qwen3.8 Flash                            cost 59.31
 ```
@@ -794,7 +794,7 @@ home holding a copy of the 140 session logs, its own port, its own web server):
 sessions 140, usage rows 148, tokens 2,011,822,094, calls 9,028
 sessions with cwd     140 / 140      (was 1 / 75 on the live ledger)
 sessions with title    58 / 140
-D:\LLM\knowledge-base 56 · E:\bosc_project\LLM-Wiki知识包模版 17 · E:\bosc_project\torchv-master 14 · …
+<workspace>/knowledge-base 56 · <workspace>/wiki-templates 17 · <workspace>/torchv-master 14 · …
 ```
 
 ### The model column merged two endpoints into one row
@@ -978,8 +978,11 @@ useful:
   exactly how three of them were wrong. That is not the same as looking at them.
   This environment has no headless browser to rasterize with (Electron is here, but
   the packaged DSH build will not run an external app, and a script path passed to
-  it is ignored), so `docs/logo-preview.html` exists for a human to open instead —
-  all twelve at the page's real 18px and enlarged, on a light and a dark band.
+  it is ignored), so `tools/logo-preview.html` exists for a human to open instead —
+  all twelve at the page's real 18px and enlarged, on a light and a dark band. It
+  lives in the repository rather than in `docs/`, because `docs/` ships and this is a
+  development artefact: `tools/` is not in `files`, and CI now fails if anything but
+  Markdown appears under `docs/`.
 - **Price accuracy.** The tables are asserted to carry what the source published,
   spot-checked against one vendor's published numbers. Nothing here verifies that
   a source is correct, current, or the price a given account is actually billed.

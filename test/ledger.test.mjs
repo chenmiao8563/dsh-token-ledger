@@ -403,7 +403,7 @@ test('agrees with an independent naive recomputation over generated logs', () =>
 test('a session can be attributed to the directory it worked in', () => {
   // A workspace bill groups by this, and it is on the session's own creation
   // record rather than in anything the caller has to know about.
-  assert.equal(cwdOf([{ type: 'session/created', cwd: 'D:\\LLM\\knowledge-base' }]), 'D:\\LLM\\knowledge-base')
+  assert.equal(cwdOf([{ type: 'session/created', cwd: 'D:\\work\\knowledge-base' }]), 'D:\\work\\knowledge-base')
   assert.equal(cwdOf([{ type: 'x', data: { cwd: 'C:\\work' } }]), 'C:\\work')
   assert.equal(cwdOf([{ type: 'x', data: { header: { cwd: 'C:\\deep' } } }]), 'C:\\deep')
   assert.equal(cwdOf([]), null)

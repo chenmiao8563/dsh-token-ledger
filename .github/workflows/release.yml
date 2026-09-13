@@ -5,8 +5,12 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      # A dispatch can never publish: every publishing step below is also gated
+      # on `refs/tags/v`, which a branch dispatch is not. Setting this to false
+      # therefore does not turn a dispatch into a release — it packs either way.
+      # Publishing happens by pushing a `v*` tag, and nothing else.
       dry-run:
-        description: 'Pack and validate without publishing'
+        description: 'Pack and validate. Publishing only ever happens on a v* tag push, never from a dispatch.'
         type: boolean
         default: true
 
@@ -147,7 +151,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes "See [CHANGELOG.md](CHANGELOG.md) for what changed." \
-            *dsh-token-ledger-*.tgz
+          # Idempotent on purpose. `gh release create` fails with HTTP 422
+          # `already_exists` when the tag already has a release, which turned
+          # exactly the runs that had already succeeded into the red ones and
+          # made "re-run this release" unusable.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "$GITHUB_REF_NAME already has a release; uploading the tarball to it"
+            gh release upload "$GITHUB_REF_NAME" *dsh-token-ledger-*.tgz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "See [CHANGELOG.md](CHANGELOG.md) for what changed." \
+              *dsh-token-ledger-*.tgz
+          fi
+
+      # The Publish step is skipped when the version is already on the registry,
+      # so a run can be green without having published anything. That is by
+      # design — but it means "the run passed" and "the version is live" are
+      # different sentences, and the v0.8.0 investigation lost time to exactly
+      # that gap. This step makes the run assert the second one.
+      - name: The version really is on the registry
+        if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true
+        run: |
+          set -eu
+          version="${{ steps.version.outputs.value }}"
+          live=$(npm view "@chenmiao8563/dsh-token-ledger@$version" version 2>/dev/null || true)
+          if [ "$live" != "$version" ]; then
+            echo "::error title=not published::the run passed but @chenmiao8563/dsh-token-ledger@$version is not on the registry (npm view returned '${live:-nothing}')"
+            exit 1
+          fi
+          echo "@chenmiao8563/dsh-token-ledger@$version is on the registry"

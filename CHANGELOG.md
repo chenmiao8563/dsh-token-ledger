@@ -4,6 +4,101 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-09-13
+
+1.0 is not a rewrite. It is the release where the promises are made where the tools
+can actually read them, and where the ones that were not true are gone.
+
+### Changed
+
+- **The DSH version requirement is declared where DSH reads it.** The package now
+  carries `peerDependencies` on the five host packages the two halves bind to —
+  `@deepseek-ai/dsh-session-persistence` (the `sessionPersistence` service the usage
+  comes from), `dsh-commands` (`commands`, which registers `/tokens`),
+  `dsh-host-webserver` (`webServer`, which serves the three settings routes),
+  `dsh-client-locale` and `dsh-client-ui-settings-general` (both injected by the
+  browser half) — each at `^0.1.2-rc.1`. The floor is the version this was built and
+  tested against; the `^` puts the ceiling at `0.2.0`, which is as far as the API
+  surface used here has been inspected.
+
+  Every one is `optional`, and that is a fact about DSH rather than a hedge: DSH does
+  not hoist host packages into a profile's `node_modules`, so a required peer would
+  report an unmet dependency on every install and mean nothing. The declaration is
+  still read, because DSH resolves a plugin's peer from the plugin's own
+  `node_modules`, then the profile tree, then **the DSH installation itself**
+  (`node_modules/dshmarket/lib/check.js`), and compares the result with the range — so
+  an unsupported harness is reported rather than silently mounted. Nothing is
+  installed for a consumer: optional peers are not fetched.
+
+### Removed
+
+- **`dsh.pluginType` and `dsh.compatibility`.** Neither is read by anything in DSH.
+  `pluginType` does not occur once in the whole 186 MB `app.asar`, and every
+  `compatibility` hit in it is unrelated prose. `dsh.compatibility.dsh` had been
+  declaring `>=0.1.2-alpha.1` since before there was anything to declare it to — an
+  open-ended claim covering every future DSH including majors that do not exist, in a
+  package whose own verification notes say only `0.1.2-rc.1` has been run. A field
+  that looks like a promise and is not one is worse than no field, so both are gone
+  and the peer range above takes over the job.
+
+### Added
+
+- **Three subpath exports that were missing**: `./rates`, `./rates-service` and
+  `./vendor-prices`. All three ship in `lib/` and none of them was reachable through
+  the `exports` map, which is the API declaration — `./route` and `./providers` were
+  exported and `./rates` was not, with no stated principle separating them. At 1.0 the
+  map is the list of supported entry points, and it is now complete.
+- **A packaging check for the peer declaration**, so the properties that make it safe
+  cannot quietly stop being true: every peer must be a `@deepseek-ai/*` host package,
+  must carry a range, must be marked optional, and `peerDependenciesMeta` may only
+  describe declared peers. The verifier no longer asserts "no peerDependencies" — that
+  promise was replaced by this stronger, more specific one.
+- **The release workflow asserts the version is on the registry** before it reports
+  success, so a green run means published rather than merely attempted.
+
+### Fixed
+
+- **`docs/VERIFICATION.md` shipped the maintainer's real workspace paths and session
+  titles** to every npm consumer — `E:\bosc_project\…`, `D:\LLM\…` and real
+  conversation titles, in a tarball that is otherwise careful to write `<DSH_HOME>` and
+  `<tmp>`. They are placeholders now, with the measurements they carried left intact.
+  The same values were replaced with neutral ones in two test files.
+- **The license badge pointed at the unscoped name.** `img.shields.io/npm/l/dsh-token-ledger.svg`
+  cannot resolve — that name was rejected at publish time as too similar to
+  `dsh-tokenledger` — so the front page of the 1.0 listing rendered an invalid badge.
+  Both READMEs now use the scoped name.
+- **The test count was stated three ways.** The README said 284, the Chinese README
+  96, and `docs/VERIFICATION.md` 288. A full run settles it: **288 tests in 14 files,
+  0 failures**. Both READMEs now say 288.
+- **"Since 0.6 the settings page has three tabs"** — the English README was wrong. The
+  Bill tab arrived in 0.5.0, which is what the Chinese README already said; the 0.5.0
+  entry here also described "four tabs" and then added "the existing views", counting
+  the same thing twice. Both corrected.
+- **`verify-package.mjs` printed an aggregate `ok` after a real `FAIL`.** The summary
+  line "shipped modules import only node: builtins and relative files" was
+  unconditional, so it contradicted the per-file failures directly above it. It now
+  depends on them.
+- **`package-lock.json` claimed version `0.2.0`** — six releases stale in a file that
+  is committed but never ships. Regenerated at 1.0.0.
+- **The Releasing section in both READMEs described the manual-OTP path as the normal
+  one**, and claimed "re-running it is safe" while `gh release create` fails on a
+  release that already exists. The section is now built around the tag push, names the
+  two causes of the v0.5.0–v0.8.0 publish failures (npm < 11.5.1 cannot do the OIDC
+  exchange; `setup-node`'s `registry-url` writes an `_authToken` line that makes npm
+  skip trusted publishing), and the release step is now idempotent.
+
+### The data files, and what 1.x promises about them
+
+`ledger.json` is **derived**: every number in it can be recomputed from the session
+logs on disk, and `dsh-token-ledger audit` exists to prove exactly that. It is
+versioned (`LEDGER_VERSION = 5`) and a file written by another version is refused and
+rebuilt, which loses nothing. 1.x keeps that behaviour.
+
+`rates.json` is the one file that holds something **not** derivable: prices you typed
+in by hand. It carries no version field. **1.x will keep reading the shape that is on
+disk and will not silently drop a hand-entered price**; a change that could not honour
+that would have to be a major release and would have to ship a migration.
+
 ## [0.8.0] - 2026-09-13
 
 ### Added
@@ -220,7 +315,7 @@ not shipped yet.
 
 ### Added
 
-- **账单 / Bill: the ledger as a bill.** A fourth tab groups the same usage five
+- **账单 / Bill: the ledger as a bill.** A third tab groups the same usage five
   ways and states a cost for each group, with the call count, the four token
   buckets collapsed to what a bill shows, and the cache hit rate:
   - **By vendor, by workspace, by session or by model.** Workspace comes from the
@@ -288,8 +383,8 @@ not shipped yet.
   rewritten in the new shape on the next write; `dsh-token-ledger rebuild` does
   the same on demand, and the rebuild is idempotent — the same sessions produce
   the same totals.
-- **The settings page has four tabs**: 概览 / Overview, 费率 / Rates, 账单 / Bill
-  and the existing views, and only the tab that is open reads its route. Opening
+- **The settings page has three tabs**: 概览 / Overview, 费率 / Rates, 账单 / Bill,
+  and only the tab that is open reads its route. Opening
   the bill costs one request, not three, and the prices are still fetched only
   when the rates tab is opened.
 - **A row is marked as hand-entered only when the number actually changed.**
@@ -505,8 +600,9 @@ Four things only a person reading the rendered table could have asked for:
   drops scripts and `on*` attributes. Every bundled mark is then diffed against the
   vendor's original file — same elements in the same order, same path geometry,
   same transforms, fill-rules and classes — so only those four changes can differ.
-  `docs/logo-preview.html` shows all twelve at the page's real 18px and enlarged,
-  on a light and a dark band.
+  `tools/logo-preview.html` shows all twelve at the page's real 18px and enlarged,
+  on a light and a dark band. (It moved there from `docs/` in 1.0, so that it stops
+  shipping in the tarball.)
 
 ### Notes
 
@@ -648,7 +744,8 @@ so both now have regression tests.
 - Zero runtime dependencies, zero peer dependencies and no install scripts, so
   the package installs without a build step.
 
-[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/chenmiao8563/dsh-token-ledger/compare/v0.7.0...v0.7.1

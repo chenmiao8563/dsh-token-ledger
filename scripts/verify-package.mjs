@@ -5,7 +5,9 @@
  * The point is not to restate what npm already validates. It is to fail the
  * build when one of the promises the README makes stops being true:
  *
- * 1. no runtime, peer or optional dependencies;
+ * 1. nothing is installed for the consumer: no runtime, optional or bundled
+ *    dependencies, and every declared peer is an optional `@deepseek-ai` host
+ *    package that npm and pnpm will therefore never fetch;
  * 2. no install scripts, so a git-URL install never needs a build to be
  *    authorized;
  * 3. no bare module specifiers in shipped code, so the plugin loads from any
@@ -43,13 +45,37 @@ function check(ok, label, detail = '') {
 
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
-for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundledDependencies']) {
+for (const field of ['dependencies', 'optionalDependencies', 'bundledDependencies']) {
   const value = manifest[field]
   check(
     value === undefined || Object.keys(value).length === 0,
     `no ${field}`,
     value === undefined ? '' : JSON.stringify(value),
   )
+}
+
+// peerDependencies are allowed, but only as declarations. The plugin states
+// which host packages it binds to so DSH can check them against the install it
+// is actually running in; it must never cause one to be fetched. Two rules make
+// that true: every peer is optional, and every peer is a host package. An
+// optional peer is not auto-installed, and a `@deepseek-ai/*` peer cannot be
+// satisfied from the registry by accident because the host owns those names.
+const peers = manifest.peerDependencies ?? {}
+check(
+  Object.keys(peers).length > 0,
+  'declares the host packages it binds to as peers',
+  Object.keys(peers).join(', '),
+)
+for (const [name, range] of Object.entries(peers)) {
+  check(name.startsWith('@deepseek-ai/'), `peer ${name} is a host package`, name)
+  check(typeof range === 'string' && range.length > 0, `peer ${name} carries a range`, String(range))
+  check(
+    manifest.peerDependenciesMeta?.[name]?.optional === true,
+    `peer ${name} is optional, so nothing installs it`,
+  )
+}
+for (const name of Object.keys(manifest.peerDependenciesMeta ?? {})) {
+  check(name in peers, `peerDependenciesMeta only describes declared peers: ${name}`)
 }
 
 for (const forbidden of ['preinstall', 'install', 'postinstall', 'prepare', 'prepublish']) {
@@ -124,16 +150,20 @@ check(patch.includes(`name: '${manifest.name}'`), `bundle patch inserts ${manife
 
 // Bare specifiers are what break a loose module or an unhoisted profile.
 const BARE_IMPORT = /(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s+['"]([^'"]+)['"]|(?:^|\n)\s*import\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+let bareSpecifiers = 0
 for (const path of listed) {
   if (!path.endsWith('.js') && !path.endsWith('.mjs')) continue
   const text = readFileSync(path, 'utf8')
   for (const match of text.matchAll(BARE_IMPORT)) {
     const specifier = match[1] ?? match[2]
     if (specifier.startsWith('.') || specifier.startsWith('node:')) continue
+    bareSpecifiers += 1
     check(false, `no bare specifier in ${path.slice(root.length + 1)}`, specifier)
   }
 }
-check(true, 'shipped modules import only node: builtins and relative files')
+// The aggregate line has to depend on the loop above it: printing `ok` after a
+// real FAIL is how a summary comes to contradict its own detail.
+check(bareSpecifiers === 0, 'shipped modules import only node: builtins and relative files')
 
 const plugin = await import(pathToFileURL(join(root, 'lib/index.js')).href)
 check(plugin.name === 'token-ledger', 'plugin exports its name', String(plugin.name))

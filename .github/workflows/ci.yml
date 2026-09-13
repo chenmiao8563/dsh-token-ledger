@@ -26,9 +26,9 @@ jobs:
           - os: macos-latest
             node: '24.x'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
 
@@ -52,8 +52,8 @@ jobs:
     name: published contents
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22.x'
 
@@ -82,6 +82,15 @@ jobs:
             echo "$listing" | grep -qx "$required" || { echo "missing from tarball: $required"; exit 1; }
           done
           echo "$listing" | grep -q '^package/docs/VERIFICATION.md$' || { echo 'missing docs'; exit 1; }
+          # Everything shipped under docs/ has to be Markdown. `docs/` is listed
+          # wholesale in `files`, so any other file lands in the tarball too —
+          # that is how a scratch HTML preview of the vendor marks got published.
+          unexpected_docs=$(echo "$listing" | grep -E '^package/docs/' | grep -vE '\.md$' || true)
+          if [ -n "$unexpected_docs" ]; then
+            echo "docs/ may only ship Markdown; found:"
+            echo "$unexpected_docs"
+            exit 1
+          fi
           # No test or CI files should ship.
           if echo "$listing" | grep -qE '^package/(test|\.github)/'; then echo 'tests or workflows leaked into the tarball'; exit 1; fi
 
