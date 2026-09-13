@@ -170,14 +170,26 @@ jobs:
       # design — but it means "the run passed" and "the version is live" are
       # different sentences, and the v0.8.0 investigation lost time to exactly
       # that gap. This step makes the run assert the second one.
+      #
+      # It polls, because the registry's read side is not instantly consistent:
+      # straight after a successful publish `npm view` can still answer E404 for
+      # a minute or two. Asserting once made a release that had worked perfectly
+      # go red at its last step — which is the same class of false alarm this
+      # step exists to remove. Four minutes of patience, then it is real.
       - name: The version really is on the registry
         if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true
         run: |
           set -eu
           version="${{ steps.version.outputs.value }}"
-          live=$(npm view "@chenmiao8563/dsh-token-ledger@$version" version 2>/dev/null || true)
-          if [ "$live" != "$version" ]; then
-            echo "::error title=not published::the run passed but @chenmiao8563/dsh-token-ledger@$version is not on the registry (npm view returned '${live:-nothing}')"
-            exit 1
-          fi
-          echo "@chenmiao8563/dsh-token-ledger@$version is on the registry"
+          package='@chenmiao8563/dsh-token-ledger'
+          for attempt in $(seq 1 24); do
+            live=$(npm view "$package@$version" version 2>/dev/null || true)
+            if [ "$live" = "$version" ]; then
+              echo "$package@$version is on the registry (visible after $attempt check(s))"
+              exit 0
+            fi
+            echo "check $attempt: npm view answered '${live:-nothing}'; the registry may still be propagating"
+            sleep 10
+          done
+          echo "::error title=not published::$package@$version is still not on the registry after four minutes, so this run published nothing"
+          exit 1
