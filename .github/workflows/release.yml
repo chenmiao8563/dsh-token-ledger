@@ -21,14 +21,21 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # No dependency cache on purpose: a release build should not be able to
       # resolve anything stale. The only dependencies are the two test-only
       # React packages, and the package itself ships with none.
-      - uses: actions/setup-node@v4
+      #
+      # Node 24, not 22: trusted publishing needs npm >= 11.5.1, and the npm
+      # bundled with Node 22 is npm 10, which cannot do the OIDC exchange at
+      # all. With npm 10 the publish goes out unauthenticated and the registry
+      # answers 404 Not Found - PUT, which reads like a missing package rather
+      # than a missing credential. Every Release run from v0.5.0 to v0.8.0
+      # failed on this step.
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22.x'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install test-only React
@@ -70,9 +77,20 @@ jobs:
             echo "@chenmiao8563/dsh-token-ledger@${{ steps.version.outputs.value }} is not on the registry yet"
           fi
 
+      # NODE_AUTH_TOKEN is cleared here on purpose, and it is the second half of
+      # the same 404. actions/setup-node exports a placeholder
+      # `NODE_AUTH_TOKEN` when the workflow does not supply one (see
+      # actions/setup-node#1440), and `registry-url` writes it into .npmrc as
+      # `_authToken`. npm then sends that bogus bearer token instead of asking
+      # for an OIDC token, so the registry rejects the write — again as a 404.
+      # An explicitly empty variable is what lets npm fall back to OIDC.
       - name: Publish
         if: startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true && steps.published.outputs.value == 'false'
-        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ''
+        run: |
+          npm --version
+          npm publish --access public
 
       # The release needs a tarball whether or not this run published one. When
       # the version is already on the registry the Publish step is skipped, so
