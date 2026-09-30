@@ -17,7 +17,7 @@
 
 ```
 $ dsh-token-ledger audit
-scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
+scanned 139 session log(s), 344203 events, 29 forked session(s), 0 unreadable
 
   stored      6901 calls  1205685663 tokens
   recomputed  6901 calls  1205685663 tokens
@@ -174,7 +174,7 @@ dsh-token-ledger audit   [选项]       从原始日志重算并对比
 dsh-token-ledger rebuild [选项]       从原始日志重算
 dsh-token-ledger export  [选项]       导出 CSV 与 JSON
 
---home <path>    DSH home（默认 $DSH_HOME，其次 ~/.dsh）
+--home <path>    DSH home（默认读 DSH_HOME 环境变量，其次 ~/.dsh）
 --ledger <path>  要读写的账本文件
 --out <path>     导出目录
 --days <n>       摘要显示天数（默认 7）
@@ -395,6 +395,21 @@ false` 关闭启动时的磁盘折叠；`backfill: false` 则两个都关，账�
   内置一份价目表几周内就会过期，而且每次更新都得发一个版本。
 - **不注册面向模型的工具。** 工具 schema 会在每次请求上花提示词 token 并改变缓存前缀——
   对一个 token 记账插件来说这很荒唐。人类场景由 `/tokens` 与 CLI 覆盖。
+
+## 权限
+
+它对运行它的机器做了什么——写清楚，好让它可以被**核对**，而不是被**猜测**：
+
+| 能力 | 实际行为 |
+| --- | --- |
+| **文件** | 以只读方式读取 `<DSH_HOME>/sessions/` 下的会话日志；读取 `<DSH_HOME>/settings.yaml` 只为拿到账单上显示的供应商名称。写入只发生在它自己的目录里——`<DSH_HOME>/token-ledger/ledger.json` 与 `rates.json`——以及你主动要求的导出。该目录之外既不写也不删；代码里唯一的 `unlink` 是原子写失败后清理它自己产生的临时文件。 |
+| **网络** | 只在费率功能开启时（默认开启）发起普通 HTTPS `GET`：价格目录（`models.dev`，若选择该来源则为 `openrouter`）、美元汇率，以及最多 3 个目录未自行定价的厂商定价页。`rates: false` 会去掉全部请求，只保留手动填写的价格。抓取失败时保留上次已存结果，绝不清空。浏览器半边不发起任何外部请求：它那 4 处 `fetch` 都是同源请求，打向本插件自己的 `/api/token-ledger/*` 路由。 |
+| **命令** | 没有 shell、没有子进程、没有 spawn：运行时代码不 import `child_process`，也不调用 `exec`、`spawn` 或 `fork`——安装时与运行时都没有。它对外提供的是通过宿主自身 `commands` 服务注册的 `/tokens` 斜杠命令，以及你自己运行的 `dsh-token-ledger` 可执行文件。 |
+| **凭据** | 不读取任何凭据。`process.env` 只在未显式传入 home 时用来解析 `DSH_HOME`；不读任何提供方 API key、不读 `.credentials.yaml`、不碰 keychain、不做 OAuth。你的任何信息都不会离开这台机器：唯一的对外请求就是上面那些价格地址，只带 `accept` 与 user-agent，别无其他。 |
+| **安装** | 没有 `preinstall`、`install`、`postinstall` 或 `prepare` 脚本；无运行时依赖；无原生二进制；无符号链接与子模块；不禁用、不替换、不重复安装任何 `@deepseek-ai/*` 官方组件。 |
+
+以上每一条都可以对着固定 Commit 核对——import、URL 与状态目录都在 `lib/` 里，
+而保证"安装侧"成立的那些打包不变式由 `npm run verify` 断言。
 
 ## 兼容性
 

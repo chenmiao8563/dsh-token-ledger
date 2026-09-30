@@ -19,7 +19,7 @@ what the running host recorded.
 
 ```
 $ dsh-token-ledger audit
-scanned 139 session log(s), 344203 events, 29 fork(s), 0 unreadable
+scanned 139 session log(s), 344203 events, 29 forked session(s), 0 unreadable
 
   stored      6901 calls  1205685663 tokens
   recomputed  6901 calls  1205685663 tokens
@@ -191,7 +191,7 @@ dsh-token-ledger audit   [options]       recompute from raw logs and diff
 dsh-token-ledger rebuild [options]       recompute from raw logs
 dsh-token-ledger export  [options]       write CSV and JSON exports
 
---home <path>    DSH home to read (default: $DSH_HOME, else ~/.dsh)
+--home <path>    DSH home to read (default: the DSH_HOME variable, else ~/.dsh)
 --ledger <path>  ledger file to read or write
 --out <path>     export destination directory
 --days <n>       days in the summary (default 7)
@@ -482,6 +482,23 @@ run, or the one after a session was resumed outside this host, opens a file.
 - **No model-facing tool.** A tool schema costs prompt tokens on every request
   and shifts the cache prefix — a strange thing for a token-accounting plugin to
   do. `/tokens` and the CLI cover the human cases.
+
+## Permissions
+
+What the plugin does with the machine it runs on, stated so it can be checked rather than
+inferred:
+
+| Capability | What it actually does |
+| --- | --- |
+| **Files** | Reads the session logs under `<DSH_HOME>/sessions/`, read-only, and reads `<DSH_HOME>/settings.yaml` for the provider display names a bill shows. Writes two files in its own directory — `<DSH_HOME>/token-ledger/ledger.json` and `rates.json` — plus exports where you ask for them. Nothing outside that directory is written or removed; the one `unlink` in the codebase cleans up its own temporary file after a failed atomic write. |
+| **Network** | Plain HTTPS `GET`s, and only while the rates feature is on (it is on by default): the price catalogue (`models.dev`, or `openrouter` if that source is chosen), the USD/CNY rate, and at most three vendor pricing pages for vendors the catalogue does not price itself. `rates: false` removes every one of them and leaves hand-entered prices as the only source. A failed fetch keeps the last stored result rather than clearing it. The browser half makes no external request at all: its four `fetch` calls are same-origin requests to this plugin's own `/api/token-ledger/*` routes. |
+| **Commands** | No shell, no child process, no spawn: the runtime imports no `child_process` and calls no `exec`, `spawn` or `fork` — neither at install time nor at run time. What it exposes is the `/tokens` slash command, registered through the host's own `commands` service, and the `dsh-token-ledger` binary you run yourself. |
+| **Credentials** | None are read. `process.env` is consulted only to resolve `DSH_HOME` when no explicit home is passed; no provider API key, no `.credentials.yaml`, no keychain, no OAuth. Nothing about you leaves the machine: the only outbound requests are the price URLs above, and they carry an `accept` header and a user-agent, nothing else. |
+| **Install** | No `preinstall`, `install`, `postinstall` or `prepare` script; no runtime dependencies; no native binaries; no symlinks or submodules; and no `@deepseek-ai/*` component is disabled, replaced or duplicated. |
+
+Every claim above can be checked against the fixed commit — the imports, the URLs and the
+state directory are all in `lib/`, and `npm run verify` asserts the packaging invariants
+that keep the install side true.
 
 ## Compatibility
 

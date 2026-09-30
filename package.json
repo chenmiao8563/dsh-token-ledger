@@ -1,6 +1,6 @@
 {
   "name": "@chenmiao8563/dsh-token-ledger",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Transparent, auditable token accounting for DeepSeek Harness: a restart-safe ledger over the durable session log, a CLI that recomputes it from raw logs and diffs the result, and a bill — by workspace, session, model or provider, exportable as CSV or JSON.",
   "keywords": [
     "dsh",
@@ -104,6 +104,11 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings-general"
       ]
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
     }
   },
   "repository": {
