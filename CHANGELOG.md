@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-30
+
+### Fixed
+
+- **The declared DSH range excluded the harness that ships today.** 1.0.0 declared
+  `^0.1.2-rc.1` on all five host peers. DSH 0.2 evaluates those ranges at startup and skips
+  a plugin it reads as incompatible, and `^0.1.2-rc.1` does not accept `0.2.0-rc.2` — so on
+  0.2.0-rc.2 the package stayed installed, and never mounted: no settings section, no
+  `/api/token-ledger/*` routes, no startup line in the host log. All five peers are now
+  `^0.2.0-rc.1`, which accepts `0.2.0-rc.2`.
+
+  No runtime code changed, because none had to: `evaluatePluginCompatibility` from the
+  0.2.0-rc.2 `dsh-app-boot` now reports no incompatible peers for this manifest, the
+  interfaces both halves bind to (`ctx.on`/`inject`/`get`/`effect`, `commands.register`,
+  `sessionPersistence.list()/inspect()`, and `settings.section` with
+  `ctx.slots.inject`/`ctx.slots.register`) keep their 0.1.2 shapes, and all 288 tests pass
+  with the changed manifest. The exemption route is deliberately not used: an exact-version
+  grant would have said this plugin is incompatible and run it anyway, which is not what the
+  evidence shows.
+
+### Changed
+
+- **The slot-registry devDependency now models the runtime it tests against.**
+  `@deepseek-ai/dsh-client-ui-slots` 0.1.2-rc.1 → `^0.2.0-rc.2`, so the registration tests run
+  against the registry the current harness actually installs. The export surface is
+  unchanged, so no test needed an edit.
+
 ## [1.0.0] - 2026-09-13
 
 1.0 is not a rewrite. It is the release where the promises are made where the tools

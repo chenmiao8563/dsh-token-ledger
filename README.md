@@ -83,10 +83,15 @@ The ledger is written to `<DSH_HOME>/token-ledger/ledger.json`.
 
 ### What DSH it needs
 
-**DSH `^0.1.2-rc.1`** — 0.1.2-rc.1 is the version this was built and tested against,
-and that is what the range's floor says. The `^` puts the ceiling at `0.2.0`: the API
-surface used here was inspected across the 0.1.2 line, not tested against a future
-one.
+**DSH `^0.2.0-rc.1`** — 0.2.0-rc.2 is the version this is currently verified against, and
+the floor is written as `0.2.0-rc.1` because that is how this ecosystem spells a
+prerelease range. The `^` puts the ceiling at `0.3.0`.
+
+This range is load-bearing rather than decorative: DSH compares it against the running
+harness at startup and **skips a plugin whose range excludes it**. `^0.1.2-rc.1` — the
+range 1.0.0 shipped with — does not accept `0.2.0-rc.2`, so 1.0.0 was silently skipped
+by every 0.2 harness and 1.0.1 exists to fix exactly that. A `0.1.x` harness is now
+outside the declared range.
 
 The requirement is declared the way the ecosystem actually reads it — as
 `peerDependencies` on the five host packages the two halves bind to:
@@ -428,10 +433,14 @@ wants; the rates page still works.
 
 - **Node:** ≥ 22.15.0 (the CLI decodes Zstandard frames). The host half itself
   needs nothing version-specific.
-- **DSH:** `^0.1.2-rc.1`, declared as optional peers on the five host packages it
-  binds to — see [What DSH it needs](#what-dsh-it-needs). Verified on `0.1.2-rc.1`. The
-  surface used — `ctx.on`, `ctx.inject`, `ctx.get`, `ctx.effect`, `commands.register`,
-  and `sessionPersistence.list()/inspect()` — is the same across the `0.1.2` line.
+- **DSH:** `^0.2.0-rc.1`, declared as optional peers on the five host packages it
+  binds to — see [What DSH it needs](#what-dsh-it-needs). Held against `0.2.0-rc.2`:
+  DSH's own compatibility evaluator accepts this manifest, and every interface the two
+  halves use — `ctx.on`, `ctx.inject`, `ctx.get`, `ctx.effect`, `commands.register`,
+  `sessionPersistence.list()/inspect()`, and the `settings.section` slot with
+  `ctx.slots.inject`/`ctx.slots.register` — is unchanged in the `0.2.0` line.
+  [`docs/VERIFICATION.md`](docs/VERIFICATION.md) records the last full in-app run, which
+  was on `0.1.2-rc.1`.
 - **Profiles:** any. There is no profile-specific code.
 - **Network:** the rates tab fetches prices and the USD rate over HTTPS. This is
   entirely optional: with no route to the internet the last fetched result is
