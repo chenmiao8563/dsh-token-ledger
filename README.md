@@ -93,6 +93,12 @@ range 1.0.0 shipped with — does not accept `0.2.0-rc.2`, so 1.0.0 was silently
 by every 0.2 harness and 1.0.1 exists to fix exactly that. A `0.1.x` harness is now
 outside the declared range.
 
+The same range is also declared as `engines.dsh`, which is the field a plugin market's
+compatibility preflight reads and displays — `dshmarket` derives its verdict from that field
+together with the host peers, and shows the conjunction of everything declared. Both carry
+the identical string, so the market shows one requirement rather than a conjunction of two
+spellings of it, and the two cannot drift apart without someone editing both.
+
 The requirement is declared the way the ecosystem actually reads it — as
 `peerDependencies` on the five host packages the two halves bind to:
 

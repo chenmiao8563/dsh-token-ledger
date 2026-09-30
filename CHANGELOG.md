@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-09-30
+
+### Added
+
+- **`engines.dsh: "^0.2.0-rc.1"` — the host requirement where a plugin market reads it.** DSH
+  itself evaluates the `peerDependencies` range at startup, and that declaration does not
+  change. A market's preflight reads a different field: `dshmarket` derives its compatibility
+  verdict from `engines.dsh` (top level wins over `dsh.engines.dsh`) together with the host
+  peers, and displays the conjunction of everything declared. Both now carry the identical
+  string, so the market shows one range rather than two spellings of it, and neither can drift
+  without the other being edited.
+
+  Runtime behaviour is unchanged: nothing reads `engines.dsh` but a market, and it says what
+  the peers already said.
+
+- **`assets/screenshots/`**, documenting the shots the market can display and the rules it
+  enforces on them (1–8 declared, at most 6 rendered, PNG/JPEG, no SVG, paths relative to
+  `screenshots.json`). The declaration file itself lands with the images.
+
 ## [1.1.0] - 2026-09-30
 
 ### Added
