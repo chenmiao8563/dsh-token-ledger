@@ -3,18 +3,23 @@
 The plugin market shows these beside the listing. They are declared in
 [`screenshots.json`](../../screenshots.json) at the repository root, which
 `awesome-dsh-plugin`'s nightly build reads straight out of the repository — no pull
-request, no npm release: push the images here and the next build picks them up.
+request, no npm release: push an image here, list it in that file, and the next build
+picks it up.
 
-## What to capture
+## What is here
 
-Three shots cover what the plugin does; the market shows at most six, so four is plenty.
+| File | Shows |
+| --- | --- |
+| `01-overview.jpg` | Overview: this month's totals, today, and a year of activity |
+| `02-calendar.jpg` | The calendar — busiest, lightest and latest day — and usage by model |
+| `03-weekly.jpg` | The last seven days as bars, with the same by-model breakdown |
+| `04-rates.jpg` | Rates: the live USD/CNY rate and each vendor's published price list |
 
-| File | What it shows | Why it earns a slot |
-| --- | --- | --- |
-| `01-overview.png` | Settings → Token ledger, the overview tab | The page the plugin exists to draw: range totals, today, the calendar |
-| `02-bill.png` | The bill tab, grouped by workspace or session | The feature nothing else here has: usage turned into money |
-| `03-rates.png` | The rates tab, prices and the USD rate | Where the numbers come from, and that they are editable offline |
-| `04-tokens.png` | `/tokens` in a conversation, its reply | The path that needs no browser at all |
+Two gaps worth closing the next time someone has the GUI open: the **bill** tab — the
+grouping by workspace, session, model and vendor, and the export — and `/tokens` in a
+conversation, which is the path that needs no browser at all. `02-calendar.jpg` and
+`03-weekly.jpg` also overlap: both end on the same by-model chart, and only the heatmap's
+period differs, so one of the two is a candidate to swap for a bill shot.
 
 ## Rules the market enforces
 

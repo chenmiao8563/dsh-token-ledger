@@ -37,6 +37,28 @@ over five periods each, exportable as CSV or JSON in one file). The bill names t
 price source, the rate and every price it could not apply, so the number can be
 checked. See [Settings page](#settings-page).
 
+## Screenshots
+
+The settings page's tabs, captured on a real ledger — the totals are this machine's:
+
+**Overview**, with the month's totals, today's usage and a year of activity:
+
+![Overview tab: month totals, today's usage, and the year's activity heatmap](assets/screenshots/01-overview.jpg)
+
+**The calendar**, which is where a month's shape lives — busiest day, lightest day, the
+day that ran latest — above the same usage broken down by model:
+
+![Calendar view: month heatmap with the busiest, lightest and latest day, and usage by model](assets/screenshots/02-calendar.jpg)
+
+**The last seven days** as bars, with the same by-model breakdown:
+
+![Seven-day token totals as bars, with usage by model](assets/screenshots/03-weekly.jpg)
+
+**Rates**: the live USD/CNY rate and each vendor's published price list, each price
+editable by hand for the times the network is not there:
+
+![Rates tab: USD/CNY rate and per-vendor model prices](assets/screenshots/04-rates.jpg)
+
 ## Why it installs where others do not
 
 | Property | Why it matters |
