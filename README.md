@@ -381,6 +381,7 @@ Override the composition entry by its `id`:
   config:
     ledgerPath: 'D:/dsh/ledger.json'   # default: <DSH_HOME>/token-ledger/ledger.json
     backfill: false                     # default: true — fold stored history on startup
+    backfillLogs: false                 # default: true — read the session logs on disk too
     rates: false                        # default: true — false makes no network request at all
     # rates also takes an object:
     # rates:
@@ -411,6 +412,31 @@ Override the composition entry by its `id`:
 `rates: false` disables the pricing feature's networking entirely and leaves
 hand-entered values as the only source. That is the setting a strictly offline host
 wants; the rates page still works.
+
+### Where the history comes from
+
+A fresh install shows the ledger you already have rather than one that starts today. Two
+sources are folded at startup, and each session is owned — permanently — by whichever of
+them folded it first.
+
+- **The session logs on disk**,
+  `<DSH_HOME>/sessions/<project>/<session>/session.jsonl.zstd`. This is the durable record,
+  it is complete, and it needs nothing from the host: they are the same files `rebuild` and
+  `audit` read. Every session nobody has folded yet comes from here, which is what makes a
+  first install show its history instead of an empty page.
+- **`sessionPersistence`**, the host service. It covers what a log cannot — a session whose
+  file has not been written yet — and it is the incremental path for the sessions the live
+  event stream folded.
+
+They hand over different arrays: a log is the harness's compact row form, whose indices mean
+something else than the logical event list's. A cursor is therefore only ever advanced by the
+source that set it, and the other one refuses rather than re-counting a session. `backfillLogs:
+false` keeps the startup fold off the disk; `backfill: false` turns both off and starts empty.
+
+The disk fold reads one session per turn of the event loop, so a first run cannot stall the
+host, and it skips every log that has not been written since the previous pass from a single
+`stat`. A host that has run before pays nothing for history it already folded — only the first
+run, or the one after a session was resumed outside this host, opens a file.
 
 ## What it deliberately does not do
 
@@ -460,7 +486,7 @@ The ledger file is left alone on purpose — delete
 
 ```bash
 npm install         # devDependencies only: react, react-dom, and the slot registry DSH runs
-npm test            # 288 tests in 14 files
+npm test            # 297 tests in 14 files
 npm run verify      # packaging invariants (dependency-free, no install scripts, no bare imports)
 ```
 

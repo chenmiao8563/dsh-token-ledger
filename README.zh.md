@@ -310,6 +310,7 @@ dsh-token-ledger export  [选项]       导出 CSV 与 JSON
   config:
     ledgerPath: 'D:/dsh/ledger.json'   # 默认 <DSH_HOME>/token-ledger/ledger.json
     backfill: false                     # 默认 true——启动时折叠已存历史
+    backfillLogs: false                 # 默认 true——同时读取磁盘上的会话日志
     rates: false                        # 默认 true——false 时完全不发网络请求
     # rates 也可以写成对象：
     # rates:
@@ -338,6 +339,25 @@ dsh-token-ledger export  [选项]       导出 CSV 与 JSON
 
 `rates: false` 会彻底关掉定价功能的联网，只保留手动填写的值——这正是严格离线环境
 需要的配置。费率页本身照常可用。
+
+### 历史从哪里来
+
+全新安装看到的是**你已有的账**，而不是从今天开始记。启动时会折叠两个来源，每个会话从被谁
+先折叠那一刻起就**永久归谁所有**。
+
+- **磁盘上的会话日志**：`<DSH_HOME>/sessions/<项目>/<会话>/session.jsonl.zstd`。这是持久记录，
+  内容是完整的，而且**完全不需要宿主**——`rebuild` 与 `audit` 读的就是同一批文件。凡是还没有
+  被折叠过的会话都从这里来，这正是全新安装能立刻显示历史、而不是一张空表的原因。
+- **`sessionPersistence`**，宿主服务。它覆盖日志覆盖不到的部分——日志文件尚未落盘的会话——
+  也是实时事件流折叠过的那些会话的增量通道。
+
+两者交出来的**不是同一个数组**：日志是宿主的 compact row 形式，下标含义与逻辑事件列表不同。
+因此一条游标只会被"设置它的那个来源"推进，另一个来源会拒绝而不是重复计数。`backfillLogs:
+false` 关闭启动时的磁盘折叠；`backfill: false` 则两个都关，账本从空开始。
+
+磁盘折叠每轮事件循环只读一个会话，所以首次运行也不会卡住宿主；每一轮之后**只用一个 `stat`**
+跳过自上次以来没被写过的日志。已经跑过的主机在历史上不花任何代价——只有首次运行、或者某个
+会话在本宿主之外被续跑过之后，才会真正打开文件。
 
 ## 它刻意不做的事
 
@@ -377,7 +397,7 @@ dsh plugin --profile web remove @chenmiao8563/dsh-token-ledger
 
 ```bash
 npm install         # 两个 devDependency：react 与 react-dom，供渲染测试使用
-npm test            # 288 个测试，14 个文件
+npm test            # 297 个测试，14 个文件
 npm run verify      # 打包不变式（零依赖、无安装脚本、无裸模块说明符）
 ```
 

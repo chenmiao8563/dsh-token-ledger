@@ -4,6 +4,53 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-30
+
+### Added
+
+- **A fresh install folds the history already on disk, without asking the host for anything.**
+  The startup backfill went through `sessionPersistence` alone, so a host without that service
+  — which is every host, since it is an optional peer — began at the day the plugin was
+  installed. The session logs at
+  `<DSH_HOME>/sessions/<project>/<session>/session.jsonl.zstd` are the durable record, and the
+  same files `rebuild` and `audit` have always read; the host half reads them now too, through
+  one shared fold (`lib/session-logs.js`) rather than a second implementation of the same walk.
+
+  The work is spread over turns of the event loop, one session at a time, so a first run folds
+  a whole history without stalling the host. When a pass finishes it records the moment, and a
+  restart compares each log's modification time against it, skipping every log that has not
+  been written since with one `stat` instead of one read. The comparison deliberately errs
+  toward reading a file again: passing over one would cost its tokens.
+
+### Changed
+
+- **A cursor now records the coordinate space it indexes** (`LEDGER_VERSION` 6). The two
+  sources do not hand over the same array — a log is the harness's *compact row* form, whose
+  indices mean something else than the logical event list's — so continuing one source's cursor
+  against the other's array would count some events twice and skip others. Every session is now
+  owned by whichever source folded it first, and the other refuses rather than guessing. A
+  version 5 file is **migrated**, not discarded: every cursor it holds came from the logical
+  list, which is exact, so the cache survives — unlike versions 2 through 5, whose files counted
+  differently and had to be rebuilt.
+
+  Sessions folded from `sessionPersistence` or a live `Session` keep their cursor, their
+  incremental catch-up and their `'session'` owner; nothing about that path changes.
+
+### Verified
+
+- 297 tests in 14 files, all passing, up from 288: the disk fold's history, its idempotence
+  across a restart, a log that grew since the last pass, a session folded from disk that the
+  live list must not advance, a session the live list folded that the disk must not re-fold,
+  the switch that turns the fold off, the cursor-origin refusal, the version 5 migration and
+  the fold watermark's round trip.
+- `scripts/verify-package.mjs`: all 80 checks.
+- The CLI's `rebuild`/`audit` fold is now the shared one, and an audit against this machine's
+  session logs reports the **same disagreement** as before the extraction — 1,026,584,554 tokens
+  over 2,515 calls, unchanged — so no arithmetic moved. (Both sides had grown by the same live
+  activity in between, which is why the absolute figures are larger.)
+- Not verified: a real home's first fold under a live host. That happens on the next start, and
+  the line to watch for in the host log is `[token-ledger] folded N session log(s) from disk`.
+
 ## [1.0.1] - 2026-09-30
 
 ### Fixed

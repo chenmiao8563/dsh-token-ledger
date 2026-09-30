@@ -584,6 +584,64 @@ test('a ledger written before the cross table is refused, not half-read', () => 
   assert.deepEqual(restored.snapshot().usage, [])
 })
 
+test('a cursor is only advanced by the source that set it', () => {
+  // A session log stores the compact row form, and the live event list is the
+  // logical one. Both number a session's events from zero, so continuing one
+  // source's cursor against the other's array counts some events twice and skips
+  // others — the reason a fold has to declare where its events came from.
+  const ledger = new UsageLedger()
+  assert.equal(ledger.adoptHistory({ sessionId: 's1', events: withSeq(ALPHA_EVENTS), origin: 'log' }), true)
+  assert.equal(ledger.ownerOf('s1'), 'log')
+  assert.equal(ledger.totals.totalTokens, ALPHA_EXPECTED.totalTokens)
+
+  // The other space refuses rather than guessing.
+  assert.equal(ledger.adoptHistory({ sessionId: 's1', events: withSeq(BETA_EVENTS), origin: 'session' }), false)
+  assert.equal(ledger.adoptSession(fakeSession('s1', withSeq(BETA_EVENTS))), false)
+  assert.equal(ledger.totals.totalTokens, ALPHA_EXPECTED.totalTokens, 'and nothing was counted twice')
+
+  // The source that owns it still may, and still does not double count.
+  assert.equal(ledger.adoptHistory({ sessionId: 's1', events: withSeq(ALPHA_EVENTS), origin: 'log' }), true)
+  assert.equal(ledger.totals.totalTokens, ALPHA_EXPECTED.totalTokens)
+})
+
+test('a version 5 ledger is migrated, not discarded', () => {
+  // Version 6 adds cursor origins, and a version 5 file predates the log fold:
+  // every cursor it holds came from the logical event list. Reading it as
+  // `'session'`-owned is exact, so this upgrade keeps the cache — unlike 2
+  // through 5, whose files counted differently and had to be rebuilt.
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({ sessionId: 's1', events: withSeq(ALPHA_EVENTS) })
+  const legacy = JSON.parse(JSON.stringify(ledger.snapshot()))
+  legacy.version = 5
+  delete legacy.origins
+  delete legacy.logsFoldedAt
+
+  const restored = new UsageLedger()
+  assert.equal(restored.restore(legacy), true)
+  assert.equal(restored.totals.totalTokens, ALPHA_EXPECTED.totalTokens)
+  assert.equal(restored.ownerOf('s1'), 'session')
+  assert.equal(restored.logsFoldedAt, null, 'nothing on disk has been accounted for yet')
+  // The live list may advance it, and replaying it still does not double count.
+  assert.equal(restored.adoptHistory({ sessionId: 's1', events: withSeq(ALPHA_EVENTS) }), true)
+  assert.equal(restored.totals.totalTokens, ALPHA_EXPECTED.totalTokens)
+  // And what it writes back is the current shape.
+  assert.equal(restored.snapshot().version, 6)
+  assert.equal(restored.snapshot().origins.s1, 'session')
+})
+
+test('the moment the log fold finished survives a round trip', () => {
+  const ledger = new UsageLedger()
+  ledger.adoptHistory({ sessionId: 's1', events: withSeq(ALPHA_EVENTS), origin: 'log' })
+  ledger.markLogsFolded(1789038924335)
+  const snapshot = JSON.parse(JSON.stringify(ledger.snapshot()))
+
+  const restored = new UsageLedger()
+  assert.equal(restored.restore(snapshot), true)
+  assert.equal(restored.logsFoldedAt, 1789038924335)
+  assert.equal(restored.ownerOf('s1'), 'log', 'the origin is what keeps the other source away from this cursor')
+  assert.equal(restored.snapshot().logsFoldedAt, 1789038924335)
+})
+
 /**
  * Count compaction summaries holding usage in a generated log.
  *
